@@ -1,0 +1,53 @@
+## All Splunk hosts
+[all_splunk]
+
+## Cluster Managers
+[clustermanager]
+
+## SHC Deployers
+[shcdeployer]
+
+## Monitoring Console
+[monitoringconsole]
+
+## Deployment Server(s)
+[deploymentserver]
+
+## License Manager
+[licensemanager]
+
+## Search Heads (Stand Alone and Clustered)
+[search]
+
+## Indexers
+[indexer]
+
+## Cluster Manager AND Indexers
+[mainidxcluster]
+
+## Search Heads and Deployer of the "main" Search Head Cluster
+[mainsearch]
+
+## Search Heads of the "main" Search Head Cluster Only
+[mainsearchheads]
+
+## Search Heads and Deployer of the "itsi" Search Head Cluster
+[itsisearch]
+
+## Search Heads of the "itsi" Search Head Cluster Only
+[itsisearchheads]
+
+## Group of search heads that are part of any search head cluster
+[cluster_search]
+
+## SOAR Server(s)
+[soar]
+
+## Heavy Forwarders
+[hf]
+
+## All hosts running UF
+[splunkforwarders]
+
+## A group allowing for other groups to be managed under the "splunkforwarders" parent group. This allows you to list the hosts once and have them also be a part of the 'splunkforwarders' group by group name
+[splunkforwarders:children]

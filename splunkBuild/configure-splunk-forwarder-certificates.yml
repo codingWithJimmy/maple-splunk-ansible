@@ -1,0 +1,65 @@
+# configure-splunk-forwarder-certificates.yml
+---
+
+    - hosts: splunkforwarders
+      become: true
+      roles:
+        - '../roles/splunk-forwarders'
+      vars_files:
+        - ../vaults/{{ organization_prefix }}_splunk_passwords.yml
+
+      tasks:
+
+        - name: Create directory for certs
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: directory
+            mode: '0755'
+            recurse: yes
+          with_items:
+            - /etc/pki/tls/private/
+            - "{{ splunk_home }}/etc/auth/irs"
+
+        - name: Capture host value
+          shell: hostname -A | awk '{print $1}'
+          ignore_errors: yes
+          register: certHost
+
+        - name: Backup certificates and key
+          shell: |
+            cp /etc/pki/tls/certs/{{ certHost.stdout }}.crt /etc/pki/tls/certs/{{ certHost.stdout }}.crt.$(date +%Y%m%d)
+            cp /etc/pki/tls/private/{{ certHost.stdout }}.key /etc/pki/tls/private/{{ certHost.stdout }}.key.$(date +%Y%m%d)
+            cp {{ splunk_home }}/etc/auth/irs/IRSFullProdCAChain.pem {{ splunk_home }}/etc/auth/irs/IRSFullProdCAChain.pem.$(date +%Y%m%d)
+            cp {{ splunk_home }}/etc/auth/irs/host.pem {{ splunk_home }}/etc/auth/irs/host.pem.$(date +%Y%m%d)
+          ignore_errors: yes
+
+        - name: Sync certificate
+          synchronize:
+            src: ../sslCerts/{{ sslCertLocation }}/{{ organization_prefix }}/certs/{{ certHost.stdout }}.cer
+            dest: /etc/pki/tls/certs/{{ certHost.stdout }}.crt
+
+        - name: Sync key
+          synchronize:
+            src: ../sslCerts/{{ sslCertLocation }}/{{ organization_prefix }}/keys/{{ certHost.stdout }}.key
+            dest: /etc/pki/tls/private/{{ certHost.stdout }}.key
+
+        - name: Sync IRS chain certificates
+          synchronize:
+            src: ../sslCerts/IRSFullProdCAChain.pem
+            dest: "{{ splunk_home }}/etc/auth/irs/IRSFullProdCAChain.pem"
+
+        - name: Capture hash of certificate
+          shell: /usr/bin/openssl x509 -noout -modulus -in "/etc/pki/tls/certs/{{ certHost.stdout }}.crt" | /usr/bin/openssl sha1
+          register: certHash
+
+        - name: Capture hash of key
+          shell: /usr/bin/openssl rsa -noout -modulus -in "/etc/pki/tls/private/{{ certHost.stdout }}.key" | /usr/bin/openssl sha1
+          register: keyHash
+          failed_when: certHash.stdout != keyHash.stdout
+
+        - name: Create server cert file
+          shell: |
+            cat "/etc/pki/tls/certs/{{ certHost.stdout }}.crt" > {{ splunk_home }}/etc/auth/irs/host.pem
+            echo "" >> {{ splunk_home }}/etc/auth/irs/host.pem
+            cat "/etc/pki/tls/private/{{ certHost.stdout }}.key" "{{ splunk_home }}/etc/auth/irs/IRSFullProdCAChain.pem" >> {{ splunk_home }}/etc/auth/irs/host.pem
+            chown -R {{ splunk_runtime_user }}. {{ splunk_home }}/etc/auth/irs

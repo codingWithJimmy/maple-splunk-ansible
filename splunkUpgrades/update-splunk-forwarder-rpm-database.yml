@@ -1,0 +1,18 @@
+# update-splunk-forwarder-rpm-database.yml
+---
+
+    - hosts: splunkforwarders
+      become: true
+      roles:
+        - '../roles/splunk-forwarders'
+
+      tasks:
+
+        - name: Update RPM database
+          shell: rpm -ivh "{{ splunk_runtime_user_home }}/splunkforwarder-{{ splunk_version }}.{{ splunk_install_type }}" --justdb
+          ignore_errors: yes
+
+        - name: Remove Splunk install package
+          file:
+            path: "{{ splunk_runtime_user_home }}/splunkforwarder-{{ splunk_version }}.{{ splunk_install_type }}"
+            state: absent

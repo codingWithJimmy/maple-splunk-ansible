@@ -1,0 +1,14 @@
+# configure-splunk-git-ta-gold-repo.yml
+---
+
+    - hosts: clustermanager, shcdeployer, deploymentserver, standalone, hf, monitoringconsole
+      become: true
+      become_user: "{{ splunk_runtime_user }}"
+      roles:
+        - '../roles/splunk-servers'
+      tasks:
+
+        - name: Clone the Gold TA repo to local host
+          shell: git clone {{ git_gold_repo_url }}
+          args:
+            chdir: "{{ splunk_home }}/etc"

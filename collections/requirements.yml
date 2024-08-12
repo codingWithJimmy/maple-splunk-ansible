@@ -1,0 +1,6 @@
+---
+collections:
+  - community.general
+  - ansible.utils
+  - amazon.aws
+  - community.aws

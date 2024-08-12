@@ -1,0 +1,24 @@
+# configure-splunk-bash.yml
+---
+
+    - hosts: all
+      become: true
+      become_user: "{{ splunk_runtime_user }}"
+      roles:
+        - '../roles/splunk-servers'
+
+      tasks:
+
+        - name: Install .bashrc and .bash_profile files
+          template:
+            src: "{{ item.bashtemplate }}"
+            dest: "{{ splunk_runtime_user_home }}/{{ item.bashfilepath }}"
+            owner: "{{ splunk_runtime_user }}"
+            group: "{{ splunk_runtime_user }}"
+            mode: 0644
+          become: true
+          become_user: "{{ splunk_runtime_user }}"
+          loop:
+            - { bashtemplate: '../roles/splunk-servers/templates/bashrc.j2', bashfilepath: '.bashrc' }
+            - { bashtemplate: '../roles/splunk-servers/templates/bash_profile.j2', bashfilepath: '.bash_profile' }
+            - { bashtemplate: '../roles/splunk-servers/templates/bash_colors.j2', bashfilepath: '.bash_colors' }

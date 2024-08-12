@@ -1,0 +1,2 @@
+saml_url: <URL used for SAML authentication>
+git_repo_name: <Name of repository that contains indexer cluster configurations hosted in '$SPLUNK_HOME/etc/manager-apps'>

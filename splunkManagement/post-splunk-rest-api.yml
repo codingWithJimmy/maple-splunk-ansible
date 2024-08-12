@@ -1,0 +1,27 @@
+# post-splunk-rest-api.yml
+---
+
+    - hosts: all
+      become: true
+      become_user: "{{ splunk_runtime_user }}"
+      roles:
+        - "../roles/splunk-servers"
+      vars_files:
+        - ../vaults/{{ organization_prefix }}_splunk_passwords.yml
+
+      tasks:
+
+        - name: Post to REST API
+          ansible.builtin.uri:
+            url: https://127.0.0.1:8089{{ rest_api_endpoint }}
+            user: "{{ splunk_admin_user }}"
+            password: "{{ splunkAdminPassword }}"
+            method: POST
+            force_basic_auth: yes
+            status_code: 200
+            body_format: form-urlencoded
+            body:
+              - [ "{{ setting_name }}", "{{ setting_value }}" ]
+            validate_certs: no
+          register: url_post
+          changed_when: url_post.status == 200

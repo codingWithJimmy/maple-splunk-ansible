@@ -1,0 +1,14 @@
+# stop-splunk.yml
+---
+
+    - hosts: all
+      become: true
+      roles:
+        - '../roles/splunk-servers'
+
+      tasks:
+
+        - name: Stop Splunk (systemd)
+          ansible.builtin.service:
+            name: "{{ splunk_unit_file }}"
+            state: stopped

@@ -1,0 +1,146 @@
+# configure-splunk-monitoring-console-peers.yml
+---
+
+    - hosts: monitoringconsole
+      become: true
+      roles:
+        - '../roles/splunk-servers'
+      vars_files:
+        - ../vaults/{{ organization_prefix }}_splunk_passwords.yml
+      vars:
+        search_heads: "{{ query('inventory_hostnames', 'search:!monitoringconsole') }}"
+        cluster_managers: "{{ query('inventory_hostnames', 'clustermanager:!monitoringconsole') }}"
+        search_head_deployers: "{{ query('inventory_hostnames', 'shcdeployer:!monitoringconsole') }}"
+        heavy_forwarders: "{{ query('inventory_hostnames', 'hf:!monitoringconsole') }}"
+        deployment_servers: "{{ query('inventory_hostnames', 'deploymentserver:!monitoringconsole') }}"
+        license_managers: "{{ query('inventory_hostnames', 'licensemanager:!monitoringconsole') }}"
+        all_hosts: "{{ query('inventory_hostnames', 'all:!monitoringconsole:!indexer')}}"
+
+      tasks:
+
+        - name: Add search heads as search peers
+          become_user: "{{ splunk_runtime_user }}"
+          shell: "{{ splunk_home }}/bin/splunk add search-server {{ item }}:8089 -auth {{ splunk_admin_user }}:{{ splunkAdminPassword }} -remoteUsername {{ splunk_admin_user }} -remotePassword {{ splunkAdminPassword }}"
+          loop: "{{ query('inventory_hostnames', 'search:!monitoringconsole') }}"
+          when: item != ansible_host
+          register: search_rc
+          retries: 3
+          delay: 10
+          until: search_rc.rc == 0 or search_rc.rc == 24
+          changed_when: search_rc == 0
+          failed_when: search_rc.rc !=0 and search_rc.rc != 24
+          no_log: true
+
+        - name: Add cluster managers as search peers
+          become_user: "{{ splunk_runtime_user }}"
+          shell: "{{ splunk_home }}/bin/splunk add search-server {{ item }}:8089 -auth {{ splunk_admin_user }}:{{ splunkAdminPassword }} -remoteUsername {{ splunk_admin_user }} -remotePassword {{ splunkAdminPassword }}"
+          loop: "{{ cluster_managers }}"
+          when: item != ansible_host
+          register: cm_rc
+          retries: 3
+          delay: 10
+          until: cm_rc.rc == 0 or cm_rc.rc == 24
+          changed_when: cm_rc.rc == 0
+          failed_when: cm_rc.rc !=0 and cm_rc.rc != 24
+          no_log: true
+
+        - name: Add search head deployers as search peers
+          become_user: "{{ splunk_runtime_user }}"
+          shell: "{{ splunk_home }}/bin/splunk add search-server {{ item }}:8089 -auth {{ splunk_admin_user }}:{{ splunkAdminPassword }} -remoteUsername {{ splunk_admin_user }} -remotePassword {{ splunkAdminPassword }}"
+          loop: "{{ search_head_deployers }}"
+          ignore_errors: yes
+          when: item != ansible_host
+          register: shc_rc
+          retries: 3
+          delay: 10
+          until: shc_rc.rc == 0 or shc_rc.rc == 24
+          changed_when: shc_rc.rc == 0
+          failed_when: shc_rc.rc !=0 and shc_rc.rc != 24
+          no_log: true
+
+        - name: Add heavy forwarders as search peers
+          become_user: "{{ splunk_runtime_user }}"
+          shell: "{{ splunk_home }}/bin/splunk add search-server {{ item }}:8089 -auth {{ splunk_admin_user }}:{{ splunkAdminPassword }} -remoteUsername {{ splunk_admin_user }} -remotePassword {{ splunkAdminPassword }}"
+          loop: "{{ heavy_forwarders }}"
+          when: item != ansible_host
+          register: hf_rc
+          retries: 3
+          delay: 10
+          until: hf_rc.rc == 0 or hf_rc.rc == 24
+          changed_when: hf_rc.rc == 0
+          failed_when: hf_rc.rc !=0 and hf_rc.rc != 24
+          no_log: true
+
+        - name: Add deployment servers as search peers
+          become_user: "{{ splunk_runtime_user }}"
+          shell: "{{ splunk_home }}/bin/splunk add search-server {{ item }}:8089 -auth {{ splunk_admin_user }}:{{ splunkAdminPassword }} -remoteUsername {{ splunk_admin_user }} -remotePassword {{ splunkAdminPassword }}"
+          loop: "{{ deployment_servers }}"
+          when: item != ansible_host
+          register: ds_rc
+          retries: 3
+          delay: 10
+          until: ds_rc.rc == 0 or ds_rc.rc == 24
+          changed_when: ds_rc.rc == 0
+          failed_when: ds_rc.rc !=0 and ds_rc.rc != 24
+          no_log: true
+
+        - name: Add license managers as search peers
+          become_user: "{{ splunk_runtime_user }}"
+          shell: "{{ splunk_home }}/bin/splunk add search-server {{ item }}:8089 -auth {{ splunk_admin_user }}:{{ splunkAdminPassword }} -remoteUsername {{ splunk_admin_user }} -remotePassword {{ splunkAdminPassword }}"
+          loop: "{{ license_managers }}"
+          when: item != ansible_host
+          register: lm_rc
+          retries: 3
+          delay: 10
+          until: lm_rc.rc == 0 or lm_rc.rc == 24
+          changed_when: lm_rc.rc == 0
+          failed_when: lm_rc.rc !=0 and lm_rc.rc != 24
+          no_log: true
+
+        - name: Configure MC groups
+          become_user: "{{ splunk_runtime_user }}"
+          copy:
+            content: |
+              [distributedSearch]
+              servers = {{ 'https://' + all_hosts | join(':8089,https://') + ':8089' }}
+
+              [distributedSearch:dmc_group_cluster_master]
+              servers = {{ 'https://' + groups['clustermanager'] | join(':8089,https://') + ':8089' }}
+
+              [distributedSearch:dmc_group_kv_store]
+              servers = {{ 'https://' + groups['search'] | join(':8089,https://') + ':8089' }}
+
+              [distributedSearch:dmc_group_shc_deployer]
+              servers = {{ 'https://' + groups['shcdeployer'] | join(':8089,https://') + ':8089' }}
+
+              [distributedSearch:dmc_group_search_head]
+              servers = {{ 'https://' + groups['search'] | join(':8089,https://') + ':8089' }}
+
+              [distributedSearch:dmc_group_license_master]
+              servers = {{ 'https://' + groups['licensemanager'] | join(':8089,https://') + ':8089' }}
+
+              [distributedSearch:dmc_group_deployment_server]
+              servers = {{ 'https://' + groups['deploymentserver'] | join(':8089,https://') + ':8089' }}
+
+              [distributedSearch:dmc_group_indexer]
+              servers = {{'https://' + groups['indexer'] | join(':8089,https://') + ':8089' }}
+            dest: "{{ splunk_home }}/etc/system/local/distsearch.conf"
+
+        - name: Correct localhost values
+          become_user: "{{ splunk_runtime_user }}"
+          ansible.builtin.replace:
+            path: "{{ splunk_home }}/etc/system/local/distsearch.conf"
+            regexp: "{{ 'https://' + ansible_host + ':8089' }}"
+            replace: 'localhost:localhost'
+
+        - name: Remove empty values
+          become_user: "{{ splunk_runtime_user }}"
+          ansible.builtin.replace:
+            path: "{{ splunk_home }}/etc/system/local/distsearch.conf"
+            regexp: ',?https:\/\/:8089,?'
+            replace: ''
+
+        - name: Retart Splunk (systemd)
+          ansible.builtin.service:
+            name: "{{ splunk_unit_file }}"
+            state: restarted

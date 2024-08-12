@@ -1,0 +1,16 @@
+---
+# vars file for roles/splunk-forwarders
+## Splunk installation location
+splunk_install_location: /opt
+splunk_home: "{{ splunk_install_location }}/splunkforwarder"
+splunk_unit_file: SplunkForwarder
+
+## Splunk installation package, version, and runtime user
+splunk_version: 9.3.0
+splunk_latest_url: https://www.splunk.com/en_us/download/universal-forwarder.html
+splunk_version_url: https://www.splunk.com/en_us/download/previous-releases/universalforwarder.html
+splunk_install_type: tgz
+splunk_admin_user: admin
+
+## Base apps for hosting configurations and custromer prefix
+organization_prefix: [CUSTOMER_NAME]

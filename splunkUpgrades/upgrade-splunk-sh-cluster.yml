@@ -1,0 +1,7 @@
+# upgrade-splunk-sh-cluster.yml
+---
+
+    - import_playbook: upgrade-splunk-sh-cluster-init.yml
+    - import_playbook: upgrade-splunk-sh-cluster-members.yml
+    - import_playbook: upgrade-splunk-sh-deployer.yml
+    - import_playbook: upgrade-splunk-sh-cluster-finalize.yml

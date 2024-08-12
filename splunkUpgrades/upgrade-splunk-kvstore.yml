@@ -1,0 +1,41 @@
+# upgrade-splunk-kvstore.yml
+---
+
+    - hosts: cluster_search
+      become: true
+      become_user: "{{ splunk_runtime_user }}"
+      roles:
+        - '../roles/splunk-servers'
+      vars_files:
+        - ../vaults/{{ organization_prefix }}_splunk_passwords.yml
+
+      tasks:
+
+        - name: Login to Splunk CLI
+          shell: "{{ splunk_home }}/bin/splunk login -auth {{ splunk_admin_user }}:{{ splunkAdminPassword }}"
+          no_log: true
+
+        - name: Check KVStore version
+          shell: "{{ splunk_home }}/bin/splunk show kvstore-status --verbose | grep serverVersion | head -n 1 | awk '{print $3}'"
+          register: kvstoreVersion
+          run_once: true
+
+        - name: Perform dry run to test upgrade readiness
+          shell: "{{ splunk_home}}/bin/splunk start-shcluster-upgrade kvstore -version 4.2 -isDryRun true"
+          register: upgradeReadiness
+          when: "'4.2.17' not in kvstoreVersion.stdout_lines"
+          failed_when: "'Dry run for SHC KV Store upgrade for search head cluster passed' not in upgradeReadiness.stdout"
+          run_once: true
+
+        - name: Kick off KVStore upgrade
+          shell: "{{ splunk_home}}/bin/splunk start-shcluster-upgrade kvstore -version 4.2 --answer-yes"
+          when: "'4.2.17' not in kvstoreVersion.stdout_lines"
+          run_once: true
+
+        - name: Monitor for upgrade completion
+          shell: "{{ splunk_home }}/bin/splunk show kvstore-status --verbose | grep serverVersion | head -n 1 | awk '{print $3}'"
+          register: currentVersion
+          when: "'4.2.17' not in kvstoreVersion.stdout_lines"
+          until: "'4.2.17' in currentVersion.stdout_lines"
+          retries: 60
+          delay: 60

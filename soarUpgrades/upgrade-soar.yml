@@ -1,0 +1,55 @@
+# upgrade-soar.yml
+---
+
+    - hosts: soar
+      become: true
+      become_user: "{{ soar_runtime_user }}"
+      roles:
+        - '../roles/soar-servers'
+      vars_files:
+        - ../vaults/{{ organization_prefix }}_splunk_passwords.yml
+
+      tasks:
+
+      - name: Check version
+        ansible.builtin.uri:
+          url: https://localhost:9999/rest/version
+          user: "{{ soar_admin_user }}"
+          password: "{{ splunkAdminPassword }}"
+          method: GET
+          force_basic_auth: yes
+          status_code: 200
+          validate_certs: no
+          return_content: yes
+        register: current_version
+        changed_when: current_version.json.version != soar_version
+        
+      # - name: Download SOAR installer
+      #   become_user: "{{ soar_runtime_user }}"
+      #   get_url:
+      #     url: "{{ soar_web_download }}"
+      #     dest: "{{ soar_runtime_user_home }}/{{ soar_install }}"
+      #   when: current_version.json.version != soar_version
+
+      - name: Unarchive SOAR installer archive
+        unarchive:
+          src: "{{ soar_runtime_user_home }}/soar-unpriv-{{ soar_easy_version }}.tgz"
+          dest: "{{ soar_runtime_user_home }}"
+          remote_src: True
+        when: current_version.json.version != soar_version
+
+      - name: Run installation script
+        shell: "{{ soar_runtime_user_home }}/splunk-soar/soar-install --upgrade --with-apps --splunk-soar-home {{ soar_home }} --no-prompt --ignore-warnings"
+        async: 3600
+        poll: 60
+        retries: 10
+        delay: 30
+        when: current_version.json.version != soar_version
+
+      - name: Remove the installation archive and upgrade files
+        file: 
+          path: "{{ item }}"
+          state: absent
+        with_items:
+          - "{{ soar_runtime_user_home }}/soar-unpriv-{{ soar_easy_version }}.tgz"
+          - "{{ soar_runtime_user_home }}/splunk-soar"

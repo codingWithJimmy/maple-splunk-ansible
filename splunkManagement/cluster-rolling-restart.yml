@@ -1,0 +1,31 @@
+# cluster-rolling-restart.yml
+---
+
+    - hosts: clustermanager
+      become: true
+      become_user: "{{ splunk_runtime_user }}"
+      roles:
+        - '../roles/splunk-servers'
+      vars_files:
+        - ../vaults/{{ organization_prefix }}_splunk_passwords.yml
+
+      tasks:
+
+        - name: Login to Splunk CLI
+          shell: "{{ splunk_home }}/bin/splunk login -auth {{ splunk_admin_user }}:{{ splunkAdminPassword }}"
+          no_log: true
+          retries: 5
+          delay: 10
+
+        - name: Initiate a cluster rolling restart
+          shell: "{{ splunk_home }}/bin/splunk rolling-restart cluster-peers"
+
+        - name: Short sleep to kick off restart
+          shell: ping -c 10 127.0.0.1
+
+        - name: Monitor cluster restart progress
+          shell: "{{ splunk_home }}/bin/splunk show cluster-status"
+          register: restartProgress
+          until: "' Rolling restart in progress' not in restartProgress.stdout_lines"
+          retries: 1000
+          delay: 60

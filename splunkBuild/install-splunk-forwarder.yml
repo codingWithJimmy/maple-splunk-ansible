@@ -1,0 +1,94 @@
+# install-splunk-forwarder.yml
+---
+
+    - hosts: splunkforwarders
+      become: true
+      roles:
+        - '../roles/splunk-forwarders'
+      vars_files:
+        - ../vaults/{{ organization_prefix }}_splunk_passwords.yml
+
+      tasks:
+
+        - name: Install Splunk (tgz)
+          unarchive:
+            src: "{{ splunk_runtime_user_home }}/splunkforwarder-{{ splunk_version }}.{{ splunk_install_type }}"
+            dest: "{{ splunk_install_location }}"
+            remote_src: true
+          when: splunk_install_type == "tgz"
+
+        - name: Install Splunk (rpm)
+          yum:
+            name: "{{ splunk_runtime_user_home }}/splunkforwarder-{{ splunk_version }}.{{ splunk_install_type }}"
+            state: present
+            disable_gpg_check: true
+            installroot: "{{ splunk_install_location }}"
+          when: splunk_install_type == "rpm"
+
+        - name: Install Splunk (deb)
+          apt:
+            deb: "{{ splunk_runtime_user_home }}/splunkforwarder-{{ splunk_version }}.{{ splunk_install_type }}"
+            state: present
+          when: splunk_install_type == "deb"
+
+        - name: Copy base apps to local apps directory
+          become_user: "{{ splunk_runtime_user }}"
+          synchronize:
+            src: "{{ item }}"
+            dest: "{{ splunk_home }}/etc/apps"
+          with_items:
+          - "../splunk_base_apps/{{ organization_prefix }}/{{ organization_prefix }}_all_deploymentclient"
+          - "../splunk_base_apps/{{ organization_prefix }}/{{ organization_prefix }}_cluster_forwarder_outputs"
+
+        - name: Change ownership
+          shell: chown -R {{ splunk_runtime_user }}. {{ splunk_home }} {{ splunk_runtime_user_home }}
+
+        - name: Configure user permissions for '/var/log' and configure group ownership of auditd
+          shell: "{{ item }}"
+          with_items:
+            - find /var/log/ -type f -exec  setfacl -m u:{{ splunk_runtime_user }}:rx {} \;
+            - find /var/log/ -type d -exec  setfacl -dm u:{{ splunk_runtime_user }}:rx {} \;
+            - sed -i "s/log_group = root/log_group = {{ splunk_runtime_user }}/" /etc/audit/auditd.conf
+            - service auditd restart
+          ignore_errors: true
+
+        - name: Get syslog config file
+          shell: rsyslogd -v | grep "Config file" | awk '{print $3}'
+          register: syslog_config_file
+
+        - name: Capture current syslog timestamp config
+          shell: cat "{{ syslog_config_file.stdout }}" | grep -A 1 'Use default timestamp format' | tail -n 1 | sed -E 's/.*Template(=\"|\s)([^\"]+)(\"\))?/\2/'
+          register: syslog_config
+
+        - name: Reconfigure local syslog to log higher-precision timestamps
+          ansible.builtin.replace:
+            path: "{{ syslog_config_file.stdout }}"
+            regexp: '{{ syslog_config.stdout }}'
+            replace: RSYSLOG_FileFormat
+          when: syslog_config.stdout != "RSYSLOG_FileFormat"
+
+        - name: Restart rsyslog (systemd)
+          ansible.builtin.service:
+            name: rsyslog
+            state: restarted
+          when: syslog_config.stdout != "RSYSLOG_FileFormat"
+
+        - name: Remove Splunk install package
+          file:
+            path: "{{ splunk_runtime_user_home }}/splunkforwarder-{{ splunk_version }}.{{ splunk_install_type }}"
+            state: absent
+
+        - name: Accept Splunk license
+          become_user: "{{ splunk_runtime_user }}"
+          shell: "{{ splunk_home }}/bin/splunk status --accept-license --answer-yes --no-prompt"
+          register: splunk_license_result
+          changed_when: splunk_license_result.rc != 0
+          failed_when: splunk_license_result.rc == 0
+
+        - name: Enable boot-start
+          shell: "{{ splunk_home }}/bin/splunk enable boot-start -user {{ splunk_runtime_user }}"
+
+        - name: Start Splunk (systemd)
+          ansible.builtin.service:
+            name: "{{ splunk_unit_file }}"
+            state: started

@@ -1,0 +1,20 @@
+# configure-splunk-hostnames.yml
+---
+
+    - hosts: all
+      become: true
+      roles:
+        - '../roles/splunk-servers'
+
+      tasks:
+
+        - name: Add Splunk password policy
+          ini_file:
+            path: "{{ splunk_home }}/etc/system/local/inputs.conf"
+            section: default
+            option: host
+            value: "{{ ansible_host }}"
+            state: present
+            owner: "{{ splunk_runtime_user }}"
+            group: "{{ splunk_runtime_user }}"
+            mode: '0600'

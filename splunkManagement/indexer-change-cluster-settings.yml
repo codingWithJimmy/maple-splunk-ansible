@@ -1,0 +1,25 @@
+# indexer-change-cluster-settings.yml
+---
+
+    - hosts: indexer
+      become: true
+      roles:
+        - '../roles/splunk-servers'
+      vars_files:
+        - ../vaults/{{ organization_prefix }}_splunk_passwords.yml
+
+      tasks:
+
+        - name: Login to Splunk CLI
+          shell: "{{ splunk_home }}/bin/splunk login -auth {{ splunk_admin_user }}:{{ splunkAdminPassword }}"
+          no_log: true
+
+        - name: Change cluster configs to bring down timeouts
+          shell: "{{ item }}"
+          with_items:
+            - "{{ splunk_home }}/bin/splunk edit cluster-config -heartbeat_timeout 120"
+            - "{{ splunk_home }}/bin/splunk edit cluster-config -cxn_timeout 120"
+            - "{{ splunk_home }}/bin/splunk edit cluster-config -send_timeout 120"
+            - "{{ splunk_home }}/bin/splunk edit cluster-config -rcv_timeout 120"
+            - "{{ splunk_home }}/bin/splunk edit cluster-config -rep_max_rcv_timeout 600"
+            - "{{ splunk_home }}/bin/splunk edit cluster-config -rep_max_send_timeout 600"

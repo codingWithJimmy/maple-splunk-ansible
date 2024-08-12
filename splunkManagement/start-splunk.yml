@@ -1,0 +1,15 @@
+# start-splunk.yml
+---
+
+    - hosts: all
+      become: true
+      #serial: 1
+      roles:
+        - '../roles/splunk-servers'
+
+      tasks:
+
+        - name: Start Splunk (systemd)
+          ansible.builtin.service:
+            name: "{{ splunk_unit_file }}"
+            state: started

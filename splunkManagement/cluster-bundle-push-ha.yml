@@ -1,0 +1,107 @@
+# cluster-bundle-push-ha.yml
+---
+
+    - hosts: clustermanager
+      become: true
+      become_user: "{{ splunk_runtime_user }}"
+      roles:
+        - '../roles/splunk-servers'
+      vars_files:
+        - ../vaults/{{ organization_prefix }}_splunk_passwords.yml
+
+      tasks:
+
+        - name: Pull changes from git repo
+          shell: git pull
+          register: pull
+          changed_when: pull.stdout != "Already up to date." and pull.stdout != "Already up-to-date."
+          args:
+            chdir: "{{ splunk_home }}/etc/{{ git_repo_name }}"
+
+        - name: Login to Splunk CLI
+          shell: "{{ splunk_home }}/bin/splunk login -auth {{ splunk_admin_user }}:{{ splunkAdminPassword }}"
+          no_log: true
+
+        - name: Curl the first member of your cluster group
+          ansible.builtin.uri:
+            url: https://localhost:8089/services/cluster/manager/ha_active_status
+            user: "{{ splunk_admin_user }}"
+            password: "{{ splunkAdminPassword }}"
+            method: GET
+            force_basic_auth: yes
+            status_code:
+              - 200
+              - 503
+            validate_certs: no
+            return_content: true
+          register: primary_cm
+          changed_when: primary_cm.status == 200
+          when: pull.stdout != "Already up to date." and pull.stdout != "Already up-to-date."
+
+        - name: Set HA node fact
+          set_fact:
+            cm_target: "{{ ansible_host }}"
+
+        - name: Sync repository with manager-apps
+          synchronize:
+            src: "{{ splunk_home }}/etc/{{ git_repo_name }}/"
+            dest: "{{ splunk_home }}/etc/manager-apps"
+            delete: true
+            checksum: yes
+            times: yes
+            rsync_opts:
+              - "--exclude=.git"
+              - "--exclude=.gitignore"
+              - "--exclude=_cluster"
+          delegate_to: "{{ cm_target }}"
+          when: pull.stdout != "Already up to date." and pull.stdout != "Already up-to-date." and primary_cm.status == 200
+          # when: primary_cm.status == 200
+
+        - name: Validate bundle
+          shell: "{{ splunk_home }}/bin/splunk validate cluster-bundle --check-restart -y"
+          when: pull.stdout != "Already up to date." and pull.stdout != "Already up-to-date." and primary_cm.status == 200
+          # when: primary_cm.status == 200
+
+        - name: Check validation progress
+          shell: "{{ splunk_home }}/bin/splunk show cluster-bundle-status | grep cluster_status | awk '{ print $1 }'"
+          register: validation_status
+          until: validation_status.stdout == "cluster_status=None"
+          retries: 20
+          delay: 60
+          ignore_errors: true
+          when: pull.stdout != "Already up to date." and pull.stdout != "Already up-to-date." and primary_cm.status == 200
+          # when: primary_cm.status == 200
+
+        - name: Capture errors (if any)
+          shell: "{{ splunk_home }}/bin/splunk show cluster-bundle-status | grep 'manager-apps'"
+          register: error_status
+          failed_when: error_status.stdout != ""
+          when: pull.stdout != "Already up to date." and pull.stdout != "Already up-to-date." and primary_cm.status == 200
+          # when: primary_cm.status == 200
+
+        - name: Capture status of bundle
+          shell: "{{ splunk_home }}/bin/splunk show cluster-bundle-status -y | grep last_validation_succeeded | awk '{ print $1 }'"
+          register: bundle_status
+          failed_when: bundle_status.stdout != "last_validation_succeeded=1"
+          when: pull.stdout != "Already up to date." and pull.stdout != "Already up-to-date." and primary_cm.status == 200
+          # when: primary_cm.status == 200
+
+        - name: Capture status of restart
+          shell: "{{ splunk_home }}/bin/splunk show cluster-bundle-status -y | grep restart_required | head -n 1 | awk '{ print $1 }'"
+          register: restart_status
+          failed_when: restart_status.stdout != "restart_required_apply_bundle=0"
+          when: pull.stdout != "Already up to date." and pull.stdout != "Already up-to-date." and primary_cm.status == 200
+          # when: primary_cm.status == 200
+
+        - name: Print output
+          ansible.builtin.debug:
+            msg: |
+              "{{ bundle_status.stdout }}"
+              "{{ restart_status.stdout }}"
+          when: pull.stdout != "Already up to date." and pull.stdout != "Already up-to-date." and primary_cm.status == 200
+          # when: primary_cm.status == 200
+
+        - name: Apply bundle
+          shell: "{{ splunk_home }}/bin/splunk apply cluster-bundle -y"
+          when: pull.stdout != "Already up to date." and pull.stdout != "Already up-to-date." and primary_cm.status == 200 and restart_status.stdout = "restart_required_apply_bundle=0"
+          # when: primary_cm.status == 200

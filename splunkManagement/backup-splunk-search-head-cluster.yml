@@ -1,0 +1,83 @@
+# backup-splunk-search-head-cluster.yml
+---
+
+    - hosts: cluster_search
+      become: true
+      become_user: "{{ splunk_runtime_user }}"
+      roles:
+        - '../roles/splunk-servers'
+      vars_files:
+        - ../vaults/{{ organization_prefix }}_splunk_passwords.yml
+
+      tasks:
+
+        - name: Capture system date
+          shell: date +%Y%m%d
+          register: systemDate
+          run_once: true
+
+        - name: Capture system date with timestamp
+          shell: date +%Y%m%d_%H%M%S
+          register: systemDateTime
+          run_once: true
+
+        - name: Login to Splunk CLI
+          shell: "{{ splunk_home }}/bin/splunk login -auth {{ splunk_admin_user }}:{{ splunkAdminPassword }}"
+          no_log: true
+
+        - name: Find SHC captain
+          shell: "{{ splunk_home }}/bin/splunk show shcluster-status | grep -m 1 mgmt | awk '{ print $3 }' | sed 's/https:\\/\\///' | sed 's/:8089//'"
+          register: shcCaptain
+          run_once: true
+
+        - name: Find KVStore captain
+          shell: "{{ splunk_home }}/bin/splunk show kvstore-status | grep -B 10 \"KV store captain\" | grep hostAndPort | awk '{ print $3 }' | sed 's/:8191//' | head -n 1"
+          register: kvstoreCaptain
+          run_once: true
+
+        - name: Start KVStore Backup
+          shell: "{{ splunk_home }}/bin/splunk backup kvstore -archiveName kvstore_{{ systemDateTime.stdout }}"
+          delegate_to: "{{ kvstoreCaptain.stdout }}"
+          run_once: true
+
+        - name: Monitor KVStore backup progress
+          shell: "{{ splunk_home }}/bin/splunk show kvstore-status --verbose | grep backupRestoreStatus | awk '{ print $3 }'"
+          delegate_to: "{{ kvstoreCaptain.stdout }}"
+          register: backupStatus
+          until: backupStatus.stdout.find("Ready") != -1
+          retries: 240
+          delay: 30
+
+        - name: TAR up the user directory
+          shell: tar -zcf "{{ shc_label }}-users-{{ systemDate.stdout }}.tgz" users
+          delegate_to: "{{ shcCaptain.stdout }}"
+          args:
+            chdir: "{{ splunk_home }}/etc"
+
+        - name: Grab latest bundle name
+          shell: ls -lrt {{ splunk_home }}/var/run/splunk/snapshot | grep -v .tmp | tail -n 1 | awk '{ print $9 }'
+          delegate_to: "{{ shcCaptain.stdout }}"
+          register: bundleName
+          run_once: true
+
+        - name: Copy latest bundle to S3
+          shell: aws s3 cp "{{ splunk_home }}/var/run/splunk/snapshot/{{ bundleName.stdout }}" {{ splunk_backup_bucket }}/splunk-backups/{{ systemDate.stdout }}/{{ shc_label }}/
+          delegate_to: "{{ shcCaptain.stdout }}"
+          run_once: true
+
+        - name: Copy latest KVStore backup to S3
+          shell: aws s3 cp "{{ splunk_home }}/var/lib/splunk/kvstorebackup/kvstore_{{ systemDateTime.stdout }}.tar.gz" {{ splunk_backup_bucket }}//splunkBackups/{{ systemDate.stdout }}/{{ shc_label }}/
+          delegate_to: "{{ kvstoreCaptain.stdout }}"
+          run_once: true
+
+        - name: Copy the user directory backup to S3
+          shell: aws s3 cp "{{ splunk_home }}/etc/{{ shc_label }}-users-{{ systemDate.stdout }}.tgz" {{ splunk_backup_bucket }}/splunkBackups/{{ systemDate.stdout }}/{{ shc_label }}/
+          delegate_to: "{{ shcCaptain.stdout }}"
+          run_once: true
+
+        - name: Remove the backup user archive
+          file:
+            path: "{{ splunk_home }}/etc/{{ shc_label }}-users-{{ systemDate.stdout }}.tgz"
+            state: absent
+          delegate_to: "{{ shcCaptain.stdout }}"
+          run_once: true

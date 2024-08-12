@@ -1,0 +1,4 @@
+organization_prefix: <Customer prefix used for identifying the environment>
+splunk_bucket_location: s3://<S3 Bucket used to host downloaded Splunk packages>/splunk-download-directory
+git_repo_url: ssh://<Domain of version control up to the location of hosted repositories>
+cm_url: <DNS name used for HA>

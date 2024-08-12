@@ -1,0 +1,24 @@
+# configure-splunk-conf-stanza.yml
+---
+
+    - hosts: all
+      become: true
+      become_user: "{{ splunk_runtime_user }}"
+      roles:
+        - '../roles/splunk-servers'
+
+      tasks:
+
+      - name: Reconfigure conf file
+        ini_file:
+          path: "{{ splunk_home }}/{{ item.filePath }}"
+          section: "{{ item.stanza }}"
+          option: "{{ item.setting | d(omit)}}"
+          value: "{{ item.value | d(omit) }}"
+          state: "{{ item.state | d(omit) }}"
+          owner: "{{ splunk_runtime_user }}"
+          group: "{{ splunk_runtime_user }}"
+          mode: '0600'
+          create: yes
+        with_items:
+          - "{{ targetStanza }}"

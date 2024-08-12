@@ -1,0 +1,5 @@
+# shc-bundle-push.yml
+---
+
+    - import_playbook: get-shc-captain.yml
+    - import_playbook: apply-shc-bundle.yml

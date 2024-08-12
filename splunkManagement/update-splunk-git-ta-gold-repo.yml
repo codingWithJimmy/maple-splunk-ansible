@@ -1,0 +1,219 @@
+# update-splunk-git-ta-gold-repo.yml
+---
+
+    - hosts: clustermanager, shcdeployer, deploymentserver, standalone, hf, monitoringconsole
+    #- hosts: clustermanager, shcdeployer
+      become: true
+      become_user: "{{ splunk_runtime_user }}"
+      roles:
+        - '../roles/splunk-servers'
+      vars:
+        goldAppList: "{{ goldApps | json_query('files[].path') | regex_replace(git_gold_repo_local_path + '\\/','') }}"
+        goldAppRemove: "{{ removeApps | json_query('results[].files[].path') }}"
+
+      tasks:
+
+        - name: Pull latest changes (Gold TA Repo)
+          shell: git pull
+          register: pull
+          args:
+            chdir: "{{ git_gold_repo_local_path }}"
+          changed_when: pull.stdout != "Already up to date." and pull.stdout != "Already up-to-date."
+
+        - name: Pull latest changes (DS)
+          shell: git pull
+          register: pull
+          args:
+            chdir: "{{ splunk_home }}/etc/deployment-apps"
+          changed_when: pull.stdout != "Already up to date." and pull.stdout != "Already up-to-date."
+          when: "'deploymentserver' in group_names"
+
+        - name: Pull latest changes (CM)
+          shell: git pull
+          register: pull
+          args:
+            chdir: "{{ splunk_home }}/etc/manager-apps"
+          changed_when: pull.stdout != "Already up to date." and pull.stdout != "Already up-to-date."
+          when: "'clustermanager' in group_names"
+
+        - name: Pull latest changes (SHC)
+          shell: git pull
+          register: pull
+          args:
+            chdir: "{{ splunk_home }}/etc/shcluster"
+          changed_when: pull.stdout != "Already up to date." and pull.stdout != "Already up-to-date."
+          when: "'shcdeployer' in group_names"
+
+        - name: Synchronize TAs into the deployment directories
+          synchronize:
+            src: "{{ git_gold_repo_local_path }}/{{ item }}"
+            dest: "{{ splunk_home }}/etc/{{ distribution_directory }}"
+            delete: false
+            checksum: yes
+            times: no
+          delegate_to: "{{ inventory_hostname }}"
+          with_items: "{{ sync_app_list }}"
+          ignore_errors: yes
+
+        - name: Synchronize local TAs
+          synchronize:
+            src: "{{ git_gold_repo_local_path }}/{{ item }}"
+            dest: "{{ splunk_home }}/etc/apps"
+            delete: false
+            checksum: yes
+            times: no
+          when: "local_sync_app_list is defined and local_sync_app_list != ''"
+          delegate_to: "{{ inventory_hostname }}"
+          with_items: "{{ local_sync_app_list }}"
+          ignore_errors: yes
+
+        - name: Remove configs that don't need to be deployed (CM)
+          file:
+            path: "{{ splunk_home }}/etc/{{ distribution_directory }}/{{ item }}"
+            state: absent
+          when: "'clustermanager' in group_names and cm_config_clean_list != ''"
+          delegate_to: "{{ inventory_hostname }}"
+          with_items: "{{ cm_config_clean_list }}"
+          ignore_errors: yes
+
+        - name: Synchronize specific TAs into place
+          synchronize:
+            src: "{{ splunk_home }}/etc/{{ git_gold_repo_name }}/{{ item }}"
+            dest: "{{ splunk_home }}/etc/{{ distribution_directory }}"
+            delete: false
+            checksum: yes
+            times: no
+          when: "'clustermanager' not in group_names and specific_sync_app_list is defined and specific_sync_app_list != ''"
+          delegate_to: "{{ inventory_hostname }}"
+          with_items: "{{ specific_sync_app_list }}"
+          ignore_errors: yes
+
+        - name: Remove configs that don't need to be deployed (SHC)
+          file:
+            path: "{{ splunk_home }}/etc/{{ distribution_directory }}/{{ item }}"
+            state: absent
+          when: "'shcdeployer' in group_names and shc_config_clean_list != ''"
+          delegate_to: "{{ inventory_hostname }}"
+          with_items: "{{ shc_config_clean_list }}"
+          ignore_errors: yes
+
+        - name: Remove configs that don't need to be deployed (Stand Alone)
+          file:
+            path: "{{ splunk_home }}/etc/{{ distribution_directory }}/{{ item }}"
+            state: absent
+          when: "'standalone' in group_names and sh_config_clean_list != ''"
+          delegate_to: "{{ inventory_hostname }}"
+          with_items: "{{ sh_config_clean_list }}"
+          ignore_errors: yes
+
+        - name: Unhide apps on SHCs
+          ini_file:
+            path: "{{ splunk_home }}/etc/{{ distribution_directory }}/{{ item }}/local/app.conf"
+            section: "ui"
+            option: "is_visible"
+            value: "1"
+            state: "present"
+            owner: "{{ splunk_runtime_user }}"
+            group: "{{ splunk_runtime_user }}"
+            mode: '0600'
+            create: yes
+          when: "'shcedployer' in group_names and shc_unhide_app_list != ''"
+          with_items: "{{ shc_unhide_app_list }}"
+
+        - name: Unhide apps on HFs
+          ini_file:
+            path: "{{ splunk_home }}/etc/apps/{{ item }}/local/app.conf"
+            section: "ui"
+            option: "is_visible"
+            value: "1"
+            state: "present"
+            owner: "{{ splunk_runtime_user }}"
+            group: "{{ splunk_runtime_user }}"
+            mode: '0600'
+            create: yes
+          when: "'hf' in group_names and hf_unhide_app_list != ''"
+          with_items: "{{ hf_unhide_app_list }}"
+
+        - name: Configure local app inputs (if applicable)
+          synchronize:
+            src: "../splunkConfigs/{{ item }}_inputs.conf"
+            dest: "{{ splunk_home }}/etc/apps/{{ item }}/local/inputs.conf"
+            delete: false
+            checksum: yes
+            times: no
+          when: local_sync_app_list != ''
+          with_items: "{{ local_sync_app_list }}"
+
+        - name: Inventory of Gold TA Repo
+          find:
+            paths: "{{ git_gold_repo_local_path }}"
+            recurse: false
+            file_type: directory
+            use_regex: true
+            exclude: '^\..*'
+            patterns: '.*'
+          register: goldApps
+
+        - name: Find Splunk apps and TAs that aren't assigned (CM)
+          find:
+            paths: "{{ splunk_home }}/etc/{{ distribution_directory }}"
+            patterns: "{{ item }}"
+            exclude: "{{ sync_app_list }}"
+            use_regex: true
+            file_type: directory
+          register: removeApps
+          loop:
+            - "{{ goldAppList }}"
+          when: "'clustermanager' in group_names"
+          no_log: true
+
+        - name: Find Splunk apps and TAs that aren't assigned (SHC/Stand Alone/HF/DS/MC)
+          find:
+            paths: "{{ splunk_home }}/etc/{{ distribution_directory }}"
+            patterns: "{{ item }}"
+            exclude: "{{ sync_app_list + specific_sync_app_list }}"
+            use_regex: true
+            file_type: directory
+          register: removeApps
+          loop:
+            - "{{ goldAppList }}"
+          when: "'clustermanager' not in group_names"
+          no_log: true
+
+        - name: Remove unassigned apps
+          file:
+            path: "{{ item }}"
+            state: absent
+          with_items:
+            - "{{ goldAppRemove }}"
+
+        # - name: Update the on-prem repo (MC)
+        #   shell: git pull
+        #   register: pull
+        #   args:
+        #     chdir: "{{ splunk_home }}/repos/irs-splunk-prem-deployment-server"
+        #   changed_when: pull.stdout != "Already up to date." and pull.stdout != "Already up-to-date."
+        #   when: "'monitoringconsole' in group_names"
+
+        # - name: Sync on-prem DS apps (MC)
+        #   synchronize:
+        #     src: "{{ splunk_home }}/etc/{{ git_gold_repo_name }}/{{ item }}"
+        #     dest: "{{ splunk_home }}/repos/irs-splunk-prem-deployment-server"
+        #     delete: false
+        #     checksum: yes
+        #     times: no
+        #     rsync_opts:
+        #       - "--exclude=*/local"
+        #   when: "'monitoringconsole' in group_names and onprem_sync_app_list is defined and onprem_sync_app_list != ''"
+        #   with_items: "{{ onprem_sync_app_list }}"
+        #   delegate_to: "{{ inventory_hostname }}"
+        #   ignore_errors: yes
+
+        # - name: Commit updated apps to on-prem DS repo (MC)
+        #   shell: |
+        #     git add *
+        #     git commit -a -m "Upgraded apps and add-ons from Gold TA repo."
+        #     git push
+        #   args:
+        #     chdir: "{{ splunk_home }}/repos/irs-splunk-prem-deployment-server"
+        #   when: "'monitoringconsole' in group_names"

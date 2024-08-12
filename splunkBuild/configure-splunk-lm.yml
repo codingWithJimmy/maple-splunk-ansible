@@ -1,0 +1,85 @@
+# configure-splunk-lm.yml
+---
+
+    - hosts: licensemanager
+      become: true
+      roles:
+        - '../roles/splunk-servers'
+      vars_files:
+        - ../vaults/{{ organization_prefix }}_splunk_passwords.yml
+
+      tasks:
+
+        - name: Sync base apps to server
+          become_user: "{{ splunk_runtime_user }}"
+          synchronize:
+            src: ../splunkLicense
+            dest: "{{ splunk_runtime_user_home }}"
+
+        - name: Create list of license files
+          find: 
+            paths: "{{ splunk_runtime_user_home }}/splunkLicense"
+            patterns:'*.lic*'
+          register: find_license
+
+        - name: Copy base apps to local apps directory
+          become_user: "{{ splunk_runtime_user }}"
+          synchronize:
+            src: "{{ item }}"
+            dest: "{{ splunk_home }}/etc/apps"
+          with_items:
+          - "../splunk_base_apps/{{ organization_prefix }}/{{ organization_prefix }}_full_license_server"
+          - "../splunk_base_apps/{{ organization_prefix }}/{{ organization_prefix }}_cluster_forwarder_outputs"
+
+        - name: Configure pass4SymmKey for indexer discovery
+          ini_file:
+            path: "{{ splunk_home }}/etc/apps/{{ organization_prefix }}_cluster_forwarder_outputs/local/outputs.conf"
+            section: indexer_discovery:clustered_indexers
+            option: pass4SymmKey
+            value: "{{ idxDiscoveryPass4SymmKey }}"
+            state: present
+
+        - name: Configure cluster manager indexer discovery URI to use localhost (if Cluster Manager)
+          ini_file:
+            path: "{{ splunk_home }}/etc/apps/{{ organization_prefix }}_cluster_forwarder_outputs/local/outputs.conf"
+            section: indexer_discovery:clustered_indexers
+            option: master_uri
+            value: https://localhost:8089
+            state: present
+          when: "'clustermanager' in group_names"
+
+        - name: Remove the license base app if it exists on the host
+          file:
+            state: absent
+            path: "{{ splunk_home }}/etc/apps/{{ organization_prefix }}_full_license_server"
+
+        - name: Change ownership
+          shell: chown -R {{ splunk_runtime_user }}. {{ splunk_home }} {{ splunk_runtime_user_home }}
+
+        - name: Start Splunk (systemd)
+          ansible.builtin.service:
+            name: "{{ splunk_unit_file }}"
+            state: started
+
+        - name: Wait for Splunk management to be available
+          wait_for:
+            port: 8089
+            timeout: 300
+
+        - name: Login to Splunk CLI
+          shell: "{{ splunk_home }}/bin/splunk login -auth {{ splunk_admin_user }}:{{ splunkAdminPassword }}"
+          no_log: true
+
+        - name: Configure Enterprise license
+          become_user: "{{ splunk_runtime_user }}"
+          shell: "{{ splunk_home }}/bin/splunk add licenses {{ item }}"
+          with_items:
+            - "{{ find_license.files | map(attribute='path') | list }}"
+          loop_control:
+            pause: 3
+          ignore_errors: yes
+
+        - name: Retart Splunk (systemd)
+          ansible.builtin.service:
+            name: "{{ splunk_unit_file }}"
+            state: restarted

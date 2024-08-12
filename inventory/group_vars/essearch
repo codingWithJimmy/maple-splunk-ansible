@@ -1,0 +1,5 @@
+group_prefix: es
+shc_label: 
+enterprise_security_version: 7.1.1
+enterprise_security_archive: splunk-enterprise-security_{{ enterprise_security_version | regex_replace("\.") }}.spl
+enterprise_security_download_url: "s3://<S3 Bucket used to host downloaded Splunk ES installation>/splunk-apps/{{ enterprise_security_archive }}"

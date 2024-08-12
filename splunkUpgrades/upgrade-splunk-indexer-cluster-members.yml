@@ -1,0 +1,96 @@
+# upgrade-splunk-indexer-cluster-members.yml
+---
+
+    - hosts: indexer
+      become: true
+      serial: "{{ mgmt_upgrade_count | d(1) }}"
+      roles:
+        - '../roles/splunk-servers'
+      vars_files:
+        - ../vaults/{{ organization_prefix }}_splunk_passwords.yml
+
+      tasks:
+
+        - name: Check version
+          become_user: "{{ splunk_runtime_user }}"
+          shell: "{{ splunk_home }}/bin/splunk version | awk '{print $2}'"
+          register: current_version
+          changed_when: current_version.stdout != splunk_version
+
+        - name: Stop Splunk (systemd)
+          ansible.builtin.service:
+            name: "{{ splunk_unit_file }}"
+            state: stopped
+          when: current_version.stdout != splunk_version
+          ignore_errors: true
+
+        - name: Wait for Splunk management to be offline
+          wait_for:
+            host: "{{ ansible_host }}"
+            port: 8089
+            state: stopped
+            delay: 30
+            timeout: 300
+          when: current_version.stdout != splunk_version
+
+        - name: Upgrade Splunk (tgz)
+          unarchive:
+            src: "{{ splunk_runtime_user_home }}/splunk-{{ splunk_version }}.{{ splunk_install_type }}"
+            dest: "{{ splunk_install_location }}"
+            remote_src: true
+          when: splunk_install_type == "tgz" and current_version.stdout != splunk_version
+
+        - name: Upgrade Splunk (rpm)
+          shell: rpm -Uvh "{{ splunk_runtime_user_home }}/splunk-{{ splunk_version }}.{{ splunk_install_type }}" --prefix={{ splunk_install_location }}
+          when: splunk_install_type == "rpm" and current_version.stdout != splunk_version
+
+        - name: Upgrade Splunk (deb)
+          apt:
+            deb: "{{ splunk_runtime_user_home }}/splunk-{{ splunk_version }}.{{ splunk_install_type }}"
+            state: present
+          when: splunk_install_type == "deb" and current_version.stdout != splunk_version
+
+        - name: Remove Splunk install package
+          file:
+            path: "{{ splunk_runtime_user_home }}/splunk-{{ splunk_version }}.{{ splunk_install_type }}"
+            state: absent
+
+        - name: Change ownership (Non-recursive)
+          shell: chown {{ splunk_runtime_user }}. {{ splunk_home }}/* {{ splunk_home }}
+          when: current_version.stdout != splunk_version
+
+        - name: Change ownership (Targeted recursive)
+          shell: chown -R {{ splunk_runtime_user }}. {{ splunk_home }}/{{ item }}
+          when: current_version.stdout != splunk_version
+          with_items:
+            - etc
+            - bin
+            - openssl
+            - include
+            - lib
+            - quarantined_files
+            - swidtag
+            - share
+
+        - name: Accept Splunk license
+          become_user: "{{ splunk_runtime_user }}"
+          shell: "{{ splunk_home }}/bin/splunk status --accept-license --answer-yes --no-prompt"
+          register: splunk_license_result
+          changed_when: splunk_license_result.rc != 0
+          failed_when: splunk_license_result.rc == 0
+          when: current_version.stdout != splunk_version
+
+        - name: Start Splunk (systemd)
+          ansible.builtin.service:
+            name: "{{ splunk_unit_file }}"
+            state: started
+          when: current_version.stdout != splunk_version
+
+        - name: Wait for Splunk management to be online
+          wait_for:
+            host: "{{ ansible_host }}"
+            port: 8089
+            state: started
+            delay: 30
+            timeout: 300
+          when: current_version.stdout != splunk_version

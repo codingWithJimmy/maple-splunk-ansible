@@ -1,0 +1,57 @@
+# configure-splunk-user-role-repo.yml
+---
+
+    - hosts: shcdeployer, standalone
+      become: true
+      become_user: "{{ splunk_runtime_user }}"
+      roles:
+        - '../roles/splunk-servers'
+
+      tasks:
+
+        - name: Clone repo to "{{ splunk_home }}/etc/"
+          shell: git clone {{ git_repo_url }}/irs-splunk-user-roles
+          args:
+            chdir: "{{ splunk_home }}/etc"
+          ignore_errors: yes
+
+        - name: Perform a 'git pull' on roles repo
+          shell: git pull
+          args:
+            chdir: "{{ splunk_home }}/etc/irs-splunk-user-roles"
+          ignore_errors: yes
+
+        - name: Pull latest changes from BitBucket for local host (Deployer)
+          shell: |
+            git reset --hard
+            git pull
+          when: "'shcdeployer' in group_names"
+          register: shc_repo_pull
+          args:
+            chdir: "{{ splunk_home }}/etc/shcluster"
+          changed_when: shc_repo_pull.stdout != "Already up to date." and shc_repo_pull.stdout != "Already up-to-date."
+
+        - name: Synchronize roles into the shcluster/apps directory
+          shell: rsync -avi --no-perms {{ splunk_home }}/etc/irs-splunk-user-roles/{{ item }} {{ splunk_home }}/etc/shcluster/apps
+          when: "'shcdeployer' in group_names"
+          ignore_errors: yes
+          with_items:
+            - "{{ splunk_role_allow_list }}"
+
+        - name: Remove current role apps from being tracked in Git
+          shell: git rm -r --cached apps/{{ item }}
+          args:
+            chdir: "{{ splunk_home }}/etc/shcluster"
+          with_items:
+            - "{{ splunk_role_allow_list }}"
+          when: "'shcdeployer' in group_names"
+
+        - name: Commit role removal from cluster repo
+          shell: |
+            echo "apps/irs_prod_role*" > .gitignore
+            git add .gitignore
+            git commit -a -m "Removed user role configurations from cluster repo. Committed by {{ tower_user_first_name }} {{ tower_user_last_name }} ({{ tower_user_name }})."
+            git push
+          args:
+            chdir: "{{ splunk_home }}/etc/shcluster"
+          when: "'shcdeployer' in group_names"

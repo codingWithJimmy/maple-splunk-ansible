@@ -1,0 +1,5 @@
+# configure-splunk-monitoring-console.yml
+---
+
+    - import_playbook: configure-splunk-monitoring-console-app.yml
+    - import_playbook: configure-splunk-monitoring-console-peers.yml

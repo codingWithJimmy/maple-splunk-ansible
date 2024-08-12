@@ -1,0 +1,3 @@
+## Use these settings in the individual indexer cluster group if you manage multiple indexer clusters with a single Ansible configuration
+## saml_url: <URL used for SAML authentication>
+## git_repo_name: <Name of repository that contains indexer cluster configurations hosted in '$SPLUNK_HOME/etc/manager-apps'>

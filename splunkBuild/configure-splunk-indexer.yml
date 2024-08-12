@@ -1,0 +1,61 @@
+# configure-splunk-indexer.yml
+---
+
+    - hosts: indexer
+      become: true
+      roles:
+        - '../roles/splunk-servers'
+      vars_files:
+        - ../vaults/{{ organization_prefix }}_splunk_passwords.yml
+
+      tasks:
+
+        - name: Copy indexer base app to local apps directory
+          become_user: "{{ splunk_runtime_user }}"
+          synchronize:
+            src: "{{ item }}"
+            dest: "{{ splunk_home }}/etc/apps"
+          with_items:
+          - "../splunk_base_apps/{{ organization_prefix }}/{{ organization_prefix }}_cluster_indexer_base"
+          - "../splunk_base_apps/{{ organization_prefix }}/{{ organization_prefix }}_cluster_indexer_{{ indexer_site }}"
+          - "../splunk_base_apps/{{ organization_prefix }}/{{ organization_prefix }}_full_license_server"
+
+        - name: Configure pass4SymmKey for indexer cluster manager apps
+          ini_file:
+            path: "{{ splunk_home }}/etc/apps/{{ organization_prefix }}_cluster_indexer_base/local/server.conf"
+            section: clustering
+            option: pass4SymmKey
+            value: "{{ idxClusterPass4SymmKey }}"
+            state: present
+
+        - name: Configure password for inputs ssl password
+          ini_file:
+            path: "{{ splunk_home }}/etc/apps/{{ organization_prefix }}_cluster_indexer_base/local/server.conf"
+            section: clustering
+            option: pass4SymmKey
+            value: "{{ idxClusterPass4SymmKey }}"
+            state: present
+
+        - name: Configure pass4SymmKey for indexer cluster cascading replication
+          ini_file:
+            path: "{{ splunk_home }}/etc/apps/{{ organization_prefix }}_cluster_indexer_base/local/server.conf"
+            section: cascading_replication
+            option: pass4SymmKey
+            value: "{{ cascading_P4SK }}"
+            state: present
+
+        - name: Configure password for indexer replication
+          ini_file:
+            path: "{{ splunk_home }}/etc/apps/{{ organization_prefix }}_cluster_indexer_base/local/server.conf"
+            section: replication_port-ssl{{ ':' }}//9887
+            option: sslPassword
+            value: "{{ rep_pass }}"
+            state: present
+
+        - name: Change ownership
+          shell: chown -R {{ splunk_runtime_user }}. {{ splunk_home }} {{ splunk_runtime_user_home }} {{ index_home }}
+
+        - name: Start Splunk (systemd)
+          ansible.builtin.service:
+            name: "{{ splunk_unit_file }}"
+            state: started

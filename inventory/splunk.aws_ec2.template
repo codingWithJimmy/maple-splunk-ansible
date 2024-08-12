@@ -1,0 +1,42 @@
+plugin: amazon.aws.aws_ec2
+
+regions:
+  - REGION_OF_EC2_ASSETS
+
+filters:
+  instance-state-name: running
+  tag:Use: splunk
+
+keyed_groups:
+  - key: tags.SplunkRole.split(",")
+    separator: ""
+  - key: tags.SplunkType
+    separator: ""
+
+hostnames:
+  - name: "instance-id"
+    separator: "-"
+    prefix: "tag:Name"
+
+## Uncomment to use SSH for connectivity
+# compose:
+#   ansible_host: private_ip_address
+#   ansible_user: '"EC2_USER_FOR_SPLUNK_INSTANCES"'
+#   ansible_ssh_private_key_file: '"LOCAL_PATH_ON_ANSIBLE_HOST_TO_SSH_KEY"'
+
+## Uncomment to use SSM
+## Requires additional setup on the Ansible host
+## https://docs.ansible.com/ansible/latest/collections/amazon/aws/docsite/aws_ec2_guide.html
+
+# compose:
+#  ansible_connection: '"aws_ssm"'
+#  ansible_host: instance_id
+#  ansible_user: '"ssm-user"'
+#  ansible_aws_ssm_region: '"REGION_OF_EC2_ASSETS"'
+#  ansible_aws_ssm_bucket_name: '"S3_BUCKET_USED_BY_SSM_FOR_ANSIBLE_FILE_TRAFFIC"'
+
+allow_duplicated_hosts: true
+use_ssm_inventory: true
+
+groups:
+  splunk_servers_no_indexers: "not 'indexer' in tags.SplunkRole and not 'soar' in tags.SplunkRole"

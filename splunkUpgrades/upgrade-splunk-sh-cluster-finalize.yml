@@ -1,0 +1,26 @@
+# upgrade-splunk-sh-cluster-finalize.yml
+---
+
+    - hosts: search
+      become: true
+      roles:
+        - '../roles/splunk-servers'
+      vars_files:
+        - ../vaults/{{ organization_prefix }}_splunk_passwords.yml
+
+      tasks:
+
+        - name: Login to Splunk CLI
+          become_user: "{{ splunk_runtime_user }}"
+          shell: "{{ splunk_home }}/bin/splunk login -auth {{ splunk_admin_user }}:{{ splunkAdminPassword }}"
+
+        - name: Find captain
+          become_user: "{{ splunk_runtime_user }}"
+          shell: "{{ splunk_home }}/bin/splunk show shcluster-status | grep -m 1 mgmt | sed 's/\t\t                      mgmt_uri : //g' | sed 's/https:\\/\\///' | sed 's/:8089//'"
+          register: shcluster_captain
+
+        - name: Finalize rolling upgrade
+          become_user: "{{ splunk_runtime_user }}"
+          shell: "{{ splunk_home }}/bin/splunk upgrade-finalize shcluster-members --answer-yes"
+          run_once: True
+          delegate_to: "{{ shcluster_captain.stdout }}"

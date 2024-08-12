@@ -1,0 +1,7 @@
+# upgrade-splunk-indexer-cluster.yml
+---
+
+    - import_playbook: ../splunkManagement/enable-maintenance-mode.yml
+    - import_playbook: upgrade-splunk-indexer-cluster-members.yml
+    - import_playbook: upgrade-splunk-indexer-license-check.yml
+    - import_playbook: ../splunkManagement/disable-maintenance-mode.yml

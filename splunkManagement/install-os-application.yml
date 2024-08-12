@@ -1,0 +1,14 @@
+# install-os-application.yml
+---
+
+    - hosts: all
+      become: true
+
+      tasks:
+
+        - name: Install app
+          ansible.builtin.package:
+            name: "{{ item }}"
+            state: present
+          with_items:
+            - "{{ install_app }}"

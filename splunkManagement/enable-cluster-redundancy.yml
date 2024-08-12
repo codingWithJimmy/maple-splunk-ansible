@@ -1,0 +1,35 @@
+# enable-cluster-redudancy.yml
+---
+
+    - hosts: indexer, standalone, monitoringconsole
+      become: true
+      become_user: "{{ splunk_runtime_user }}"
+      roles:
+        - "../roles/splunk-servers"
+      vars_files:
+        - ../vaults/{{ organization_prefix }}_splunk_passwords.yml
+
+      tasks:
+
+        - name: Remove "master_uri" configurations
+          ini_file:
+            path: "{{ splunk_home }}/etc/apps/{{ organization_prefix }}_cluster_indexer_base/local/server.conf"
+            section: clustering
+            option: master_uri
+            state: absent
+          when: "'indexer' in group_names"
+
+        - name: Post load balanced URI to cluster peers
+          ansible.builtin.uri:
+            url: https://127.0.0.1:8089/services/cluster/config/config
+            user: "{{ splunk_admin_user }}"
+            password: "{{ splunkAdminPassword }}"
+            method: POST
+            force_basic_auth: yes
+            status_code: 200
+            body_format: form-urlencoded
+            body:
+              - [ manager_uri, "{{ 'https://' + cm_url + ':8089' }}" ]
+            validate_certs: no
+          register: cm_url_post
+          changed_when: cm_url_post.status == 200

@@ -1,0 +1,83 @@
+# configure-splunk-cm.yml
+---
+
+    - hosts: clustermanager
+      become: true
+      roles:
+        - '../roles/splunk-servers'
+      vars_files:
+        - ../vaults/{{ organization_prefix }}_splunk_passwords.yml
+
+      tasks:
+
+        - name: Copy base apps to local apps directory
+          become_user: "{{ splunk_runtime_user }}"
+          synchronize:
+            src: "{{ item }}"
+            dest: "{{ splunk_home }}/etc/apps"
+          with_items:
+          - "../splunk_base_apps/{{ organization_prefix }}/{{ organization_prefix }}_cluster_manager_base"
+          - "../splunk_base_apps/{{ organization_prefix }}/{{ organization_prefix }}_full_license_server"
+          - "../splunk_base_apps/{{ organization_prefix }}/{{ organization_prefix }}_cluster_forwarder_outputs"
+          - "../splunk_base_apps/{{ organization_prefix }}/{{ organization_prefix }}_cluster_indexer_{{ indexer_site }}"
+
+        - name: Configure pass4SymmKey for indexer cluster manager apps
+          ini_file:
+            path: "{{ splunk_home }}/etc/apps/{{ organization_prefix }}_cluster_manager_base/local/server.conf"
+            section: clustering
+            option: pass4SymmKey
+            value: "{{ idxClusterPass4SymmKey }}"
+            state: present
+
+        - name: Configure pass4SymmKey for indexer discovery (server)
+          ini_file:
+            path: "{{ splunk_home }}/etc/apps/{{ organization_prefix }}_cluster_manager_base/local/server.conf"
+            section: indexer_discovery
+            option: pass4SymmKey
+            value: "{{ idxDiscoveryPass4SymmKey }}"
+            state: present
+
+        - name: Configure pass4SymmKey for indexer discovery (outputs)
+          ini_file:
+            path: "{{ splunk_home }}/etc/apps/{{ organization_prefix }}_cluster_forwarder_outputs/local/outputs.conf"
+            section: indexer_discovery:clustered_indexers
+            option: pass4SymmKey
+            value: "{{ idxDiscoveryPass4SymmKey }}"
+            state: present
+
+        - name: Configure cluster manager indexer discovery URI to use localhost
+          ini_file:
+            path: "{{ splunk_home }}/etc/apps/{{ organization_prefix }}_cluster_forwarder_outputs/local/outputs.conf"
+            section: indexer_discovery:clustered_indexers
+            option: master_uri
+            value: https://127.0.0.1:8089
+            state: present
+
+        - name: Copy cluster base apps to master-apps directory
+          become_user: "{{ splunk_runtime_user }}"
+          synchronize:
+            src: "{{ item }}"
+            dest: "{{ splunk_home }}/etc/master-apps"
+          with_items:
+          - "../splunk_base_apps/{{ organization_prefix }}/{{ organization_prefix }}_indexer_s3volume_indexes"
+          - "../splunk_base_apps/{{ organization_prefix }}/{{ organization_prefix }}_indexer_volume_indexes"
+          - "../splunk_base_apps/{{ organization_prefix }}/{{ organization_prefix }}_indexer_base"
+          - "../splunk_base_apps/{{ organization_prefix }}/{{ organization_prefix }}_all_indexes"
+          - "../splunk_base_apps/{{ organization_prefix }}/{{ organization_prefix }}_full_license_server"
+          - "../splunk_base_apps/{{ organization_prefix }}/{{ organization_prefix }}_hec_inputs"
+
+        - name: Configure pass4SymmKey for indexer cluster master apps
+          ini_file:
+            path: "{{ splunk_home }}/etc/master-apps/{{ organization_prefix }}_indexer_base/local/server.conf"
+            section: clustering
+            option: pass4SymmKey
+            value: "{{ idxClusterPass4SymmKey }}"
+            state: present
+
+        - name: Change ownership
+          shell: chown -R {{ splunk_runtime_user }}. {{ splunk_home }} {{ splunk_runtime_user_home }}
+
+        - name: Retart Splunk (systemd)
+          ansible.builtin.service:
+            name: "{{ splunk_unit_file }}"
+            state: restarted

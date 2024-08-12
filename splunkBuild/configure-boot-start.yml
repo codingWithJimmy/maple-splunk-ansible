@@ -1,0 +1,44 @@
+# configure-boot-start.yml
+---
+
+    - hosts: all
+      become: true
+      roles:
+        - '../roles/splunk-servers'
+
+      tasks:
+
+        - name: Enable boot-start
+          shell: "{{ splunk_home }}/bin/splunk enable boot-start -systemd-managed 1 -user {{ splunk_runtime_user }} -group {{ splunk_runtime_user }} -create-polkit-rules 1 -systemd-unit-file-name {{ splunk_unit_file }}"
+          ignore_errors: yes
+
+        - name: Set {{ splunk_unit_file }}.service configurations (Non-Indexers)
+          ini_file:
+            path: /etc/systemd/system/{{ splunk_unit_file }}.service
+            section: Service
+            option: "TimeoutStopSec"
+            value: "{{ non_indexer_restart_timeout }}"
+            state: present
+            owner: "{{ splunk_runtime_user }}"
+            group: "{{ splunk_runtime_user }}"
+            mode: '0600'
+          when: "'indexer' not in group_names"
+
+        - name: Set {{ splunk_unit_file }}.service configurations (Indexers)
+          ini_file:
+            path: /etc/systemd/system/{{ splunk_unit_file }}.service
+            section: Service
+            option: "TimeoutStopSec"
+            value: "{{ indexer_restart_timeout }}"
+            state: present
+            owner: "{{ splunk_runtime_user }}"
+            group: "{{ splunk_runtime_user }}"
+            mode: '0600'
+          when: "'indexer' in group_names"
+
+        - name: Reload systemctl
+          shell: "systemctl daemon-reload"
+
+        - name: Change ownership of "/data/splunk" to "{{ splunk_runtime_user }}"
+          shell: chown -R {{ splunk_runtime_user }}. /data/splunk
+

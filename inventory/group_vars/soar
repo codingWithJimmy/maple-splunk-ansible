@@ -1,0 +1,2 @@
+organization_prefix: <Customer prefix used for identifying the environment>
+sslCertLocation: <Location of SSL certificates stored in the Ansible configuration>

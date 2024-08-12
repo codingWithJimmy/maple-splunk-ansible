@@ -1,0 +1,63 @@
+# upgrade-splunk-forwarder.yml
+---
+
+    - hosts: splunkforwarders
+      become: true
+      roles:
+        - '../roles/splunk-forwarders'
+
+      tasks:
+
+        - name: Check version
+          become_user: "{{ splunk_runtime_user }}"
+          shell: "{{ splunk_home }}/bin/splunk version | tail -n 1 | awk '{print $4}'"
+          register: current_version
+          changed_when: current_version.stdout != splunk_version
+
+        - name: Stop Splunk (systemd)
+          ansible.builtin.service:
+            name: SplunkForwarder
+            state: stopped
+          when: current_version.stdout != splunk_version
+          ignore_errors: true
+
+        - name: Upgrade Splunk (tgz)
+          unarchive:
+            src: "{{ splunk_runtime_user_home }}/splunkforwarder-{{ splunk_version }}.{{ splunk_install_type }}"
+            dest: "{{ splunk_install_location }}"
+            remote_src: true
+          when: splunk_install_type == "tgz" and current_version.stdout != splunk_version
+
+        - name: Upgrade Splunk (rpm)
+          shell: rpm -Uvh "{{ splunk_runtime_user_home }}/splunkforwarder-{{ splunk_version }}.{{ splunk_install_type }}"
+          when: splunk_install_type == "rpm" and current_version.stdout != splunk_version
+
+        - name: Upgrade Splunk (deb)
+          apt:
+            deb: "{{ splunk_runtime_user_home }}/splunkforwarder-{{ splunk_version }}.{{ splunk_install_type }}"
+            state: present
+          when: splunk_install_type == "deb" and current_version.stdout != splunk_version
+
+        - name: Remove Splunk install package
+          file:
+            path: "{{ splunk_runtime_user_home }}/splunkforwarder-{{ splunk_version }}.{{ splunk_install_type }}"
+            state: absent
+
+        - name: Change ownership
+          shell: chown -R {{ splunk_runtime_user }}. {{ splunk_home }} {{ splunk_runtime_user_home }}
+          when: current_version.stdout != splunk_version
+
+        - name: Accept Splunk license
+          become_user: "{{ splunk_runtime_user }}"
+          shell: "{{ splunk_home }}/bin/splunk status --accept-license --answer-yes --no-prompt"
+          register: splunk_license_result
+          changed_when: splunk_license_result.rc != 0
+          failed_when: splunk_license_result.rc == 0
+          when: current_version.stdout != splunk_version
+
+        - name: Start Splunk (systemd)
+          ansible.builtin.service:
+            name: SplunkForwarder
+            state: started
+          when: current_version.stdout != splunk_version
+          ignore_errors: true

@@ -1,0 +1,97 @@
+# update-escu.yml
+---
+
+    - hosts: shcdeployer
+      become: true
+      become_user: "{{ splunk_runtime_user }}"
+      roles:
+        - '../roles/splunk-servers'
+
+      tasks:
+
+        - name: Pull changes from git repo
+          shell: git pull
+          register: pull
+          changed_when: pull.stdout != "Already up to date." and pull.stdout != "Already up-to-date."
+          args:
+            chdir: "{{ splunk_home }}/etc/shcluster"
+
+        - name: Determine if this cluster has ES installed
+          ansible.builtin.stat:
+            path: "{{ splunk_home }}/etc/shcluster/apps/SplunkEnterpriseSecuritySuite"
+          register: es_install
+
+        - name: Determine if this cluster has ESCU installed
+          ansible.builtin.stat:
+            path: "{{ splunk_home }}/etc/shcluster/apps/DA-ESS-ContentUpdate"
+          register: escu_install
+          when: es_install.stat.isdir is defined
+
+        - name: Grab the current version of the ESCU
+          shell: cat {{ splunk_home }}/etc/shcluster/apps/DA-ESS-ContentUpdate/default/app.conf | grep ^version | awk '{print $3}'
+          register: escu_current_version
+          when: escu_install.stat.isdir is defined
+
+        - name: Grab the latest version of the ESCU from GitHub and output the file to tmp
+          shell: curl https://github.com/splunk/security_content/releases > /tmp/escu.txt
+          when: es_install.stat.isdir is defined
+
+        - name: Parse the output file to capture the latest version into a variable
+          shell: "{{ latest_escu_version_command }}"
+          register: escu_latest_version
+          when: es_install.stat.isdir is defined
+
+        - name: Grab the latest version download page from GitHub and output the file to temp
+          shell: curl https://github.com/splunk/security_content/releases/expanded_assets/v{{ escu_latest_version.stdout }} > /tmp/escu_download.txt
+          when: ((es_install.stat.isdir is defined and escu_install.stat.isdir is defined and escu_latest_version.stdout != escu_current_version.stdout) or (es_install.stat.isdir is defined and escu_install.stat.isdir is not defined))
+
+        - name: Parse the download output file to capture the latest download link into a variable
+          shell: "{{ download_escu_capture_command }}"
+          register: escu_latest_version_download
+          when: ((es_install.stat.isdir is defined and escu_install.stat.isdir is defined and escu_latest_version.stdout != escu_current_version.stdout) or (es_install.stat.isdir is defined and escu_install.stat.isdir is not defined))
+
+        - name: Download the latest version from GitHub
+          get_url:
+            url: https://github.com{{ escu_latest_version_download.stdout }}
+            dest: "{{ splunk_runtime_user_home }}/DA-ESS-ContentUpdate-v{{ escu_latest_version.stdout }}.tar.gz"
+            timeout: 60
+          register: download
+          retries: 3
+          delay: 2
+          until: download.status_code == 200
+          when: ((es_install.stat.isdir is defined and escu_install.stat.isdir is defined and escu_latest_version.stdout != escu_current_version.stdout) or (es_install.stat.isdir is defined and escu_install.stat.isdir is not defined))
+
+        - name: Extract the update
+          unarchive:
+            src: "{{ splunk_runtime_user_home }}/DA-ESS-ContentUpdate-v{{ escu_latest_version.stdout }}.tar.gz"
+            dest: "{{ splunk_home }}/etc/shcluster/apps"
+            remote_src: True
+          when: ((es_install.stat.isdir is defined and escu_install.stat.isdir is defined and escu_latest_version.stdout != escu_current_version.stdout) or (es_install.stat.isdir is defined and escu_install.stat.isdir is not defined))
+
+        - name: Add any untracked updates to Git
+          shell: git add .
+          register: add
+          args:
+            chdir: "{{ splunk_home }}/etc/shcluster"
+          when: ((es_install.stat.isdir is defined and escu_install.stat.isdir is defined and escu_latest_version.stdout != escu_current_version.stdout) or (es_install.stat.isdir is defined and escu_install.stat.isdir is not defined))
+
+        - name: Commit and push a fresh install to BitBucket
+          shell: |
+            git commit -a -m "Installed version {{ escu_latest_version.stdout }} of the ES Content Update."
+            git push
+          args:
+            chdir: "{{ splunk_home }}/etc/shcluster"
+          when: es_install.stat.isdir is defined and escu_install.stat.isdir is not defined
+
+        - name: Commit and push an upgrade to BitBucket
+          shell: |
+            git commit -a -m "Upgraded to version {{ escu_latest_version.stdout }} of the ES Content Update."
+            git push
+          args:
+            chdir: "{{ splunk_home }}/etc/shcluster"
+          when: es_install.stat.isdir is defined and escu_install.stat.isdir is defined and escu_latest_version.stdout != escu_current_version.stdout
+
+        - name: Remove the update archive
+          file:
+            path: "{{ splunk_runtime_user_home }}/DA-ESS-ContentUpdate-v{{ escu_latest_version.stdout }}.tar.gz"
+            state: absent

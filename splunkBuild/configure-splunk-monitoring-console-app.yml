@@ -1,0 +1,109 @@
+# configure-splunk-monitoring-console-app.yml
+---
+
+    - hosts: monitoringconsole
+      become: true
+      roles:
+        - '../roles/splunk-servers'
+      vars_files:
+        - ../vaults/{{ organization_prefix }}_splunk_passwords.yml
+
+      tasks:
+
+        - name: Copy base apps to local apps directory
+          become_user: "{{ splunk_runtime_user }}"
+          synchronize:
+            src: "{{ item }}"
+            dest: "{{ splunk_home }}/etc/apps"
+          with_items:
+            - "../splunk_base_apps/{{ organization_prefix }}/{{ organization_prefix }}_cluster_search_base"
+            - "../splunk_base_apps/{{ organization_prefix }}/{{ organization_prefix }}_full_license_server"
+            - "../splunk_base_apps/{{ organization_prefix }}/{{ organization_prefix }}_cluster_forwarder_outputs"
+            - "../splunk_base_apps/{{ organization_prefix }}/{{ organization_prefix }}_cluster_indexer_{{ indexer_site }}"
+
+        - name: Remove the license base app if it exists on the host (if necessary)
+          file:
+            state: absent
+            path: "{{ splunk_home }}/etc/apps/{{ organization_prefix }}_full_license_server"
+          when: "'licensemanager' in group_names"
+
+        - name: Configure pass4SymmKey for searching indexer cluster
+          ini_file:
+            path: "{{ splunk_home }}/etc/apps/{{ organization_prefix }}_cluster_search_base/local/server.conf"
+            section: clustering
+            option: pass4SymmKey
+            value: "{{ idxClusterPass4SymmKey }}"
+            state: present
+
+        - name: Configure pass4SymmKey for indexer discovery (outputs)
+          ini_file:
+            path: "{{ splunk_home }}/etc/apps/{{ organization_prefix }}_cluster_forwarder_outputs/local/outputs.conf"
+            section: indexer_discovery:clustered_indexers
+            option: pass4SymmKey
+            value: "{{ idxDiscoveryPass4SymmKey }}"
+            state: present
+
+        - name: Configure cluster manager indexer discovery URI to use localhost (if Cluster Manager)
+          ini_file:
+            path: "{{ splunk_home }}/etc/apps/{{ organization_prefix }}_cluster_forwarder_outputs/local/outputs.conf"
+            section: indexer_discovery:clustered_indexers
+            option: master_uri
+            value: https://localhost:8089
+            state: present
+          when: "'clustermanager' in group_names"
+
+        - name: Remove the license base app if it exists on the host (if necessary)
+          file:
+            state: absent
+            path: "{{ splunk_home }}/etc/apps/{{ organization_prefix }}_full_license_server"
+          when: "'licensemanager' in group_names"
+
+        - name: Change ownership
+          shell: chown -R {{ splunk_runtime_user }}. {{ splunk_home }} {{ splunk_runtime_user_home }}
+
+        - name: Retart Splunk (systemd)
+          ansible.builtin.service:
+            name: "{{ splunk_unit_file }}"
+            state: restarted
+
+        - name: Prepare Monitoring Console app for distributed mode
+          become_user: "{{ splunk_runtime_user }}"
+          shell: mkdir -p "{{ splunk_home }}/etc/apps/splunk_monitoring_console/local/data/ui/nav" && cp "{{ splunk_home }}/etc/apps/splunk_monitoring_console/default/data/ui/nav/default.distributed.xml" "{{ splunk_home }}/etc/apps/splunk_monitoring_console/local/data/ui/nav/default.xml"
+
+        - name: Set Monitoring Console app to "configured"
+          become_user: "{{ splunk_runtime_user }}"
+          copy:
+            content: |
+              [ui]
+              is_visible = 1
+
+              [launcher]
+
+              [package]
+              check_for_updates = 1
+
+              [install]
+              is_configured = 1
+            dest: "{{ splunk_home }}/etc/apps/splunk_monitoring_console/local/app.conf"
+
+        - name: Configure savedsearches.conf
+          become_user: "{{ splunk_runtime_user }}"
+          copy:
+            content: |
+              [DMC Asset - Build Standalone Asset Table]
+              alert.track = 0
+              disabled = 1
+              display.visualizations.custom.splunk_monitoring_console.heatmap.showLegend = 1
+              display.visualizations.custom.splunk_monitoring_console.heatmap.showTooltip = 1
+              display.visualizations.custom.splunk_monitoring_console.heatmap.showXAxis = 1
+              display.visualizations.custom.splunk_monitoring_console.heatmap.showYAxis = 1
+            dest: "{{ splunk_home }}/etc/apps/splunk_monitoring_console/local/savedsearches.conf"
+
+        - name: Configure peers for MC assets
+          become_user: "{{ splunk_runtime_user }}"
+          copy:
+            content: |
+              [settings]
+              configuredPeers = {{ groups['all'] | join(':8089,') + ':8089' }}
+              disabled = 0
+            dest: "{{ splunk_home }}/etc/apps/splunk_monitoring_console/local/splunk_monitoring_console_assets.conf"

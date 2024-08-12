@@ -1,0 +1,78 @@
+# configure-rapid-diag-utils.yml
+---
+
+    - hosts: all
+      become: true
+      roles:
+        - '../roles/splunk-servers'
+
+      tasks:
+
+        - name: Install Support tools for RapidDiag
+          yum:
+            name:
+            - elfutils
+            - strace
+            - tcpdump
+            - sysstat
+            - net-tools
+            - lsof
+            state: present
+
+        - name: Test eu-stack
+          become_user: "{{ splunk_runtime_user }}"
+          shell: sleep 5 & eu-stack -p $! && echo SUCCESS || echo FAILURE
+          register: euTest
+          failed_when: euTest.stdout == "FAILURE"
+          ignore_errors: true
+
+        - name: Test strace
+          become_user: "{{ splunk_runtime_user }}"
+          shell: strace -o /dev/null sleep 0 && echo SUCCESS || echo FAILURE
+          register: straceTest
+          failed_when: straceTest.stdout == "FAILURE"
+          ignore_errors: true
+
+        - name: Add ptrace in SELinux if testing eu-stack or strace fails
+          shell: |
+            setcap cap_dac_override,cap_sys_ptrace+eip $(which eu-stack)
+            setsebool -P deny_ptrace off
+          when: euTest.stdout == "FAILURE" or straceTest.stdout == "FAILURE"
+
+        - name: Re-testing eu-stack
+          become_user: "{{ splunk_runtime_user }}"
+          shell: sleep 5 & eu-stack -p $! && echo SUCCESS || echo FAILURE
+          register: euRetest
+          failed_when: euRetest.stdout == "FAILURE"
+          when: euTest.stdout == "FAILURE"
+          ignore_errors: true
+
+        - name: Re-testing strace
+          become_user: "{{ splunk_runtime_user }}"
+          shell: strace -o /dev/null sleep 0 && echo SUCCESS || echo FAILURE
+          register: straceRetest
+          failed_when: straceRetest.stdout == "FAILURE"
+          when: straceTest.stdout == "FAILURE"
+          ignore_errors: true
+
+        - name: Test tcpdump
+          become_user: "{{ splunk_runtime_user }}"
+          shell: tcpdump -qOc1 && echo SUCCESS || echo FAILURE
+          register: tcpdumpTest
+          failed_when: tcpdumpTest.stdout == "FAILURE"
+          ignore_errors: true
+
+        - name: Configure "{{ splunk_runtime_user }}" to be part of "pcap" group
+          shell: |
+            groupadd pcap
+            chgrp pcap $(which tcpdump)
+            chmod 750 $(which tcpdump)
+            setcap cap_net_raw,cap_net_admin=eip $(which tcpdump)
+            usermod -a -G pcap {{ splunk_runtime_user }}
+          when: tcpdumpTest.stdout == "FAILURE"
+
+        - name: Re-testing tcpdump
+          shell: tcpdump -qOc1 && echo SUCCESS || echo FAILURE
+          register: tcpdumpRetest
+          failed_when: tcpdumpRetest.stdout == "FAILURE"
+          when: tcpdumpTest.stdout == "FAILURE"

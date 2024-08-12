@@ -1,0 +1,57 @@
+# apply-shc-bundle.yml
+---
+
+    - hosts: shcdeployer
+      become: true
+      become_user: "{{ splunk_runtime_user }}"
+      roles:
+        - '../roles/splunk-servers'
+      vars_files:
+        - ../vaults/{{ organization_prefix }}_splunk_passwords.yml
+
+      tasks:
+
+        - name: Pull changes from git repo
+          shell: git pull
+          register: pull
+          changed_when: pull.stdout != "Already up to date." and pull.stdout != "Already up-to-date."
+          args:
+            chdir: "{{ splunk_home }}/etc/shcluster"
+
+        - name: Curl the first member of your cluster group
+          ansible.builtin.uri:
+            url: https://{{ hostvars[groups[group_prefix + 'searchheads'] | first].ansible_host }}:8089/services/shcluster/captain/info
+            user: "{{ splunk_admin_user }}"
+            password: "{{ splunkAdminPassword }}"
+            method: GET
+            force_basic_auth: yes
+            status_code: 200
+            validate_certs: no
+            return_content: true
+          register: captain_get
+          changed_when: captain_get.status == 200
+          when: pull.stdout != "Already up to date." and pull.stdout != "Already up-to-date."
+
+        - name: Name the captain
+          set_fact:
+            "shc_captain": "{{ captain_get.content | ansible.builtin.regex_search('name=\"label\">([^<]+)</s:key>','\\1' | string) | list }}"
+            "shc_host": "{{ captain_get.content | ansible.builtin.regex_search('name=\"mgmt_uri\">([^<]+)</s:key>','\\1' | string) | list }}"
+          when: pull.stdout != "Already up to date." and pull.stdout != "Already up-to-date."
+
+        - name: Display captain
+          ansible.builtin.debug:
+            msg: "{{ shc_label }} cluster captain is {{ shc_captain[0] }} - {{ shc_host[0] }}"
+          when: pull.stdout != "Already up to date." and pull.stdout != "Already up-to-date."
+
+        - name: Login to Splunk CLI
+          shell: "{{ splunk_home }}/bin/splunk login -auth {{ splunk_admin_user }}:{{ splunkAdminPassword }}"
+          no_log: true
+          when: pull.stdout != "Already up to date." and pull.stdout != "Already up-to-date."
+
+        - name: Push bundle
+          shell: "{{ splunk_home }}/bin/splunk apply shcluster-bundle --answer-yes -preserve-lookups {{ preserve_lookups }} -target {{ shc_host[0] }}"
+          async: 3600
+          poll: 60
+          retries: 3
+          delay: 30
+          when: pull.stdout != "Already up to date." and pull.stdout != "Already up-to-date."

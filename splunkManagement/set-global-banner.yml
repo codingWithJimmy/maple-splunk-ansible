@@ -1,0 +1,28 @@
+# set-global-banner.yml
+---
+
+    - hosts: splunk_banner_hosts
+      become: true
+      become_user: "{{ splunk_runtime_user }}"
+      roles:
+        - '../roles/splunk-servers'
+      vars_files:
+        - ../vaults/{{ organization_prefix }}_splunk_passwords.yml
+
+      tasks:
+
+        - name: Set message on designated search heads
+          ansible.builtin.uri:
+            url: https://127.0.0.1:8089/servicesNS/nobody/system/data/ui/global-banner/BANNER_MESSAGE_SINGLETON
+            user: "{{ splunk_admin_user }}"
+            password: "{{ splunkAdminPassword }}"
+            method: POST
+            force_basic_auth: yes
+            status_code: 200
+            body_format: form-urlencoded
+            body:
+              - [ global_banner.message, "{{ banner_message }}" ]
+              - [ global_banner.background_color, "{{ banner_color }}" ]
+            validate_certs: no
+          register: banner_post
+          changed_when: banner_post.status == 200

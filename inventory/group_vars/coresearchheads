@@ -1,0 +1,3 @@
+saml_url: <URL used for SAML authentication into front-end of the search head cluster>
+global_banner_default: <Default entry for global banner>
+global_banner_color: <Default color of global banner>

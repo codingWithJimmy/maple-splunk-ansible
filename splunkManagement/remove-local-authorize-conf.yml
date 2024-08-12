@@ -1,0 +1,31 @@
+# remove-local-authorize-conf.yml
+---
+
+    - hosts: search
+      become: true
+      become_user: "{{ splunk_runtime_user }}"
+      roles:
+        - '../roles/splunk-servers'
+      vars_files:
+        - ../vaults/{{ organization_prefix }}_splunk_passwords.yml
+
+      tasks:
+
+        - name: Login to Splunk CLI
+          ansible.builtin.shell: "{{ splunk_home }}/bin/splunk login -auth {{ splunk_admin_user }}:{{ splunkAdminPassword }}"
+          no_log: true
+
+        - name: Determine if this cluster has ES installed
+          ansible.builtin.stat:
+            path: "{{ splunk_home }}/etc/apps/SplunkEnterpriseSecuritySuite"
+          register: es_install
+
+        - name: Remove local authorize.conf if it exists
+          ansible.builtin.file:
+            path: "{{ splunk_home }}/etc/system/local/authorize.conf"
+            state: absent
+          when: es_install.stat.exists is false
+
+        - name: Reload authentication configuration
+          ansible.builtin.shell: "{{ splunk_home }}/bin/splunk _internal call /authentication/providers/services/_reload"
+          when: es_install.stat.exists is false

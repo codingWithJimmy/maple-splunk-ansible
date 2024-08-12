@@ -1,0 +1,2 @@
+saml_url: <URL used for SAML authentication of local host>
+git_repo_name: <Name of repository that contains deployment server configurations hosted in '$SPLUNK_HOME/etc/deployment-apps'>

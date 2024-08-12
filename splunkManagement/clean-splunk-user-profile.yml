@@ -1,0 +1,33 @@
+# clean-splunk-user-profile.yml
+---
+
+    - hosts: search
+      become: true
+      become_user: "{{ splunk_runtime_user }}"
+      roles:
+        - '../roles/splunk-servers'
+
+      tasks:
+
+        - name: Get today's date for backup purposes
+          shell: echo $(date +%Y%m%d)
+          register: backup_date
+
+        - name: Capture if a backup from today already exists
+          stat:
+            path: "{{ splunk_home }}/etc/user_backup_{{ backup_date }}.tgz"
+          register: existing_backup
+
+        - name: Create a backup of the user's directory
+          shell: tar -zcf users user_backup_{{ backup_date }}.tgz
+          args:
+            chdir: "{{ splunk_home }}/etc"
+          when: existing_backup.stat.exists
+
+        - name: Remove user profiles
+          file:
+            path: "{{ splunk_home }}/etc/users/{{ item }}"
+            state: absent
+          with_items:
+            - "{{ user_list }}"
+

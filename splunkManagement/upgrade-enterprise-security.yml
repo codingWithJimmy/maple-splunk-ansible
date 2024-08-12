@@ -1,0 +1,71 @@
+# update-enterprise-security.yml
+---
+
+    - hosts: shcdeployer
+      become: true
+      become_user: "{{ splunk_runtime_user }}"
+      roles:
+        - '../roles/splunk-servers'
+      vars_files:
+        - ../vaults/{{ organization_prefix }}_splunk_passwords.yml
+
+      tasks:
+
+        - name: Pull changes from git repo
+          shell: git pull
+          register: pull
+          changed_when: pull.stdout != "Already up to date." and pull.stdout != "Already up-to-date."
+          args:
+            chdir: "{{ splunk_home }}/etc/shcluster"
+
+        - name: Determine if this cluster has ES installed
+          ansible.builtin.stat:
+            path: "{{ splunk_home }}/etc/shcluster/apps/SplunkEnterpriseSecuritySuite"
+          register: es_install
+
+        - name: Determine if the ES install is staged locally
+          ansible.builtin.stat:
+            path: "{{ splunk_runtime_user_home }}/{{ enterprise_security_archive }}"
+          register: es_install_present
+
+        - name: Grab the current ES version
+          shell: cat {{ splunk_home }}/etc/shcluster/apps/SplunkEnterpriseSecuritySuite/default/apps.conf | grep ^version | awk '{print $3}'
+          register: current_es_version
+          when: es_install.stat.isdir is defined
+
+        - name: Download the latest version from S3
+          shell: aws s3 cp {{ enterprise_security_download_url }} {{ splunk_runtime_user_home }}/{{ enterprise_security_archive }}
+          when: es_install.stat.isdir is defined and current_es_version.stdout != enterprise_security_version and es_install_present.stat.exists is false
+
+        - name: Login to Splunk CLI
+          shell: "{{ splunk_home }}/bin/splunk login -auth {{ splunk_admin_user }}:{{ splunkAdminPassword }}"
+          no_log: true
+          when: es_install.stat.isdir is defined and current_es_version.stdout != enterprise_security_version
+
+        - name: Install Enterprise Security
+          shell: "{{ splunk_home }}/bin/splunk install app {{ splunk_runtime_user_home }}/{{ enterprise_security_archive }} -update 1"
+          when: es_install.stat.isdir is defined and current_es_version.stdout != enterprise_security_version
+
+        - name: Run the Enterprise Security upgrade process for deployers
+          shell: "{{ splunk_home }}/bin/splunk search '| essinstall --deployment_type shc_deployer'"
+          when: es_install.stat.isdir is defined and current_es_version.stdout != enterprise_security_version
+
+        - name: Add any untracked updates to Git
+          shell: git add .
+          register: add
+          args:
+            chdir: "{{ splunk_home }}/etc/shcluster"
+          when: es_install.stat.isdir is defined and current_es_version.stdout != enterprise_security_version
+
+        - name: Commit and push an upgrade to BitBucket
+          shell: |
+            git commit -a -m "Upgraded to version {{ enterprise_security_version }} of Enterprise Security."
+            git push
+          args:
+            chdir: "{{ splunk_home }}/etc/shcluster"
+          when: es_install.stat.isdir is defined and current_es_version.stdout != enterprise_security_version
+
+        - name: Remove the update archive
+          file:
+            path: "{{ splunk_runtime_user_home }}/{{ enterprise_security_archive }}"
+            state: absent

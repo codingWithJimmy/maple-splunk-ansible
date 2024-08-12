@@ -1,0 +1,30 @@
+# vars file for roles/splunk-servers
+
+## Splunk installation location
+splunk_install_location: /opt
+splunk_home: "{{ splunk_install_location }}/splunk"
+splunk_unit_file: splunk
+
+## Splunk installation package, version, and runtime user
+splunk_version: 9.3.0
+splunk_latest_url: https://www.splunk.com/en_us/download/splunk-enterprise.html
+splunk_version_url: https://www.splunk.com/en_us/download/previous-releases.html
+splunk_install_type: rpm
+splunk_runtime_user: splunk
+splunk_runtime_user_home: /app/splunk
+splunk_admin_user: admin
+
+## Base apps for hosting configurations and customer prefix
+path_to_base_apps: "{{ splunk_home }}"
+organization_prefix: [CUSTOMER_NAME]
+
+## Indexer Path variables where data will be stored on the indexers
+hot_index_path: /indexes/hot
+cold_index_path: /indexes/cold
+
+## Git variables
+## Used for configration of Git repos for Splunk components
+## It is recommended you configure SSH keys for git interaction
+git_base_url:
+git_gold_repo_url:
+git_gold_repo_name:

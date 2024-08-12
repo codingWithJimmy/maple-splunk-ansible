@@ -1,0 +1,28 @@
+# configure-rsyslog.yml
+---
+
+    - hosts: all
+      become: true
+
+      tasks:
+
+        - name: Get syslog config file
+          shell: rsyslogd -v | grep "Config file" | awk '{print $3}'
+          register: syslog_config_file
+
+        - name: Capture current syslog timestamp config
+          shell: cat "{{ syslog_config_file.stdout }}" | grep -A 1 'Use default timestamp format' | tail -n 1 | sed -E 's/.*Template(=\"|\s)([^\"]+)(\"\))?/\2/'
+          register: syslog_config
+
+        - name: Reconfigure local syslog to log higher-precision timestamps
+          ansible.builtin.replace:
+            path: "{{ syslog_config_file.stdout }}"
+            regexp: '{{ syslog_config.stdout }}'
+            replace: RSYSLOG_FileFormat
+          when: syslog_config.stdout != "RSYSLOG_FileFormat"
+
+        - name: Restart rsyslog (systemd)
+          ansible.builtin.service:
+            name: rsyslog
+            state: restarted
+          when: syslog_config.stdout != "RSYSLOG_FileFormat"

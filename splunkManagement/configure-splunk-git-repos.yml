@@ -1,0 +1,33 @@
+# configure-splunk-git-repos.yml
+---
+
+    - hosts: clustermanager, shcdeployer, deploymentserver
+      become: true
+      become_user: "{{ splunk_runtime_user }}"
+      roles:
+        - '../roles/splunk-servers'
+
+      tasks:
+
+        - name: Clone repo to "{{ splunk_home }}/etc/"
+          shell: git clone {{ git_repo_url }}/{{ git_repo_name }}
+          args:
+            chdir: "{{ splunk_home }}/etc"
+
+        - name: Remove .git cache from Splunk directories
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: absent
+          with_items:
+            - "{{ splunk_home }}/etc/deployment-apps/.git"
+            - "{{ splunk_home }}/etc/manager-apps/.git"
+            - "{{ splunk_home }}/etc/shcluster/.git"
+
+        - name: Set .git config file to point to gitdir location
+          shell: |
+            echo "gitdir: {{ splunk_home }}/etc/{{ git_repo_name }}/.git" > {{ item }}
+          with_items:
+            - "{{ splunk_home }}/etc/deployment-apps/.git"
+            - "{{ splunk_home }}/etc/manager-apps/.git"
+            - "{{ splunk_home }}/etc/shcluster/.git"
+          ignore_errors: yes

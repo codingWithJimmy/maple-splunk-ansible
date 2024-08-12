@@ -1,0 +1,28 @@
+# upgrade-splunk-indexer-license-check.yml
+---
+
+    - hosts: indexer
+      become: true
+      roles:
+        - '../roles/splunk-servers'
+
+      tasks:
+
+        - name: Check if Splunk is running
+          ansible.builtin.service:
+            name: "{{ splunk_unit_file }}"
+            state: started
+          register: status
+
+        - name: Accept Splunk license if not running
+          become_user: "{{ splunk_runtime_user }}"
+          shell: "{{ splunk_home }}/bin/splunk status --accept-license --answer-yes --no-prompt"
+          when: status.state != "started"
+          register: splunk_license_result
+          changed_when: splunk_license_result.rc != 0
+          failed_when: splunk_license_result.rc == 0
+
+        - name: Start Splunk (systemd)
+          ansible.builtin.service:
+            name: "{{ splunk_unit_file }}"
+            state: started

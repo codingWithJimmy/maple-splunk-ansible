@@ -1,0 +1,38 @@
+# decommission-indexer.yml
+---
+
+    - hosts: indexer
+      become: true
+      roles:
+        - '../roles/splunk-servers'
+      vars_files:
+        - ../vaults/{{ organization_prefix }}_splunk_passwords.yml
+
+      tasks:
+
+        - name: Login to Splunk CLI
+          become_user: "{{ splunk_runtime_user }}"
+          shell: "{{ splunk_home }}/bin/splunk login -auth {{ splunk_admin_user }}:{{ splunkAdminPassword }}"
+          no_log: true
+
+        - name: Offline the indexer
+          become_user: "{{ splunk_runtime_user }}"
+          shell: "{{ splunk_home }}/bin/splunk offline --enforce-counts"
+
+        - name: Wait for Splunk management to be offline
+          wait_for:
+            host: "{{ ansible_host }}"
+            port: 8089
+            state: stopped
+            retries: 20
+            delay: 60
+
+        - name: Confirmed Splunk is stopped
+          ansible.builtin.service:
+            name: "{{ splunk_unit_file }}"
+            state: stopped
+          async: 900
+          poll: 10
+
+        - name: Disable boot-start
+          shell: "{{ splunk_home }}/bin/splunk disable boot-start"

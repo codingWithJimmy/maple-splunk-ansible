@@ -1,0 +1,5 @@
+# configure-splunk-search-head-cluster.yml
+---
+
+    - import_playbook: configure-splunk-deployer.yml
+    - import_playbook: configure-splunk-init-search-head-cluster.yml

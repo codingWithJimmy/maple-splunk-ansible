@@ -1,0 +1,16 @@
+# vars file for roles/soar-servers
+
+## SOAR installation location
+soar_install_location: /opt
+soar_home: "{{ soar_install_location }}/phantom"
+
+## SOAR installation version, download, and runtime user
+soar_easy_version: 6.2.2
+soar_version: 6.2.2.134
+soar_latest_url: https://www.splunk.com/en_us/download/soar-free-trial.html
+soar_version_url: https://www.splunk.com/en_us/download/soar-free-trial/previous-releases.html
+soar_admin_user: admin
+
+## SOAR Runtime User
+soar_runtime_user: phantom
+soar_runtime_user_home: /home/{{ soar_runtime_user }}

@@ -1,0 +1,77 @@
+# backup-splunk-search-head.yml
+---
+
+    - hosts: standalone
+      become: true
+      become_user: "{{ splunk_runtime_user }}"
+      roles:
+        - '../roles/splunk-servers'
+      vars_files:
+        - ../vaults/{{ organization_prefix }}_splunk_passwords.yml
+
+      tasks:
+
+        - name: Capture system date
+          shell: date +%Y%m%d
+          register: systemDate
+          run_once: true
+
+        - name: Capture system date with timestamp
+          shell: date +%Y%m%d_%H%M%S
+          register: systemDateTime
+          run_once: true
+
+        - name: Create backup directory if it doesn't exist
+          ansible.builtin.file:
+            path: "{{ splunk_home }}/var/run/splunk/{{ organization_prefix }}_backup/{{ systemDate.stdout }}"
+            state: directory
+            mode: '0755'
+            recurse: yes
+
+        - name: Clean up backup directory (Max 3 days)
+          shell: find {{ splunk_home }}/var/run/splunk/{{ organization_prefix }}_backup/ -type d -mtime +3 -exec rm -rf {} \;
+
+        - name: Login to Splunk CLI
+          shell: "{{ splunk_home }}/bin/splunk login -auth {{ splunk_admin_user }}:{{ splunkAdminPassword }}"
+          no_log: true
+
+        - name: Enable KVStore maintenance mode
+          shell: "{{ splunk_home }}/bin/splunk enable kvstore-maintenance-mode"
+          ignore_errors: true
+
+        - name: Start KVStore Backup
+          shell: "{{ splunk_home }}/bin/splunk backup kvstore -pointInTime true -archiveName kvstore_{{ systemDateTime.stdout }}"
+          retries: 3
+          delay: 10
+
+        - name: Capture non-core apps installed on the search head
+          shell: "{{ splunk_home }}/bin/splunk search '| rest splunk_server=local /services/apps/local | search core=0 | stats values(title) as app_list | nomv app_list' -wrap 1 -header false"
+          register: appList
+
+        - name: Archive appList directory into an archive
+          shell: tar -zcf {{ splunk_home }}/var/run/splunk/{{ organization_prefix }}_backup/{{ systemDate.stdout }}/apps_{{ systemDateTime.stdout }}.tgz {{ appList.stdout }}
+          args:
+            chdir: "{{ splunk_home }}/etc/apps"
+
+        - name: Archive "users" directory into an archive
+          shell: tar -zcf {{ splunk_home }}/var/run/splunk/{{ organization_prefix }}_backup/{{ systemDate.stdout }}/users_{{ systemDateTime.stdout }}.tgz users
+          args:
+            chdir: "{{ splunk_home }}/etc"
+
+        - name: Monitor KVStore backup progress
+          shell: "{{ splunk_home }}/bin/splunk show kvstore-status --verbose | grep backupRestoreStatus | awk '{ print $3 }'"
+          register: backupStatus
+          until: backupStatus.stdout.find("Ready") != -1
+          retries: 240
+          delay: 30
+          ignore_errors: true
+
+        - name: Disable KVStore maintenance mode
+          shell: "{{ splunk_home }}/bin/splunk disable kvstore-maintenance-mode"
+
+        - name: Copy archives backup to S3
+          shell: aws s3 cp {{ item }} {{ splunk_backup_bucket }}/splunk-backups/{{ systemDate.stdout }}/{{ sh_label }}/
+          with_items:
+            - "{{ splunk_home }}/var/lib/splunk/kvstorebackup/kvstore_{{ systemDateTime.stdout }}.tar.gz"
+            - "{{ splunk_home }}/var/run/splunk/{{ organization_prefix }}_backup/{{ systemDate.stdout }}/apps_{{ systemDateTime.stdout }}.tgz"
+            - "{{ splunk_home }}/var/run/splunk/{{ organization_prefix }}_backup/{{ systemDate.stdout }}/users_{{ systemDateTime.stdout }}.tgz"

@@ -1,0 +1,121 @@
+# install-base-splunk.yml
+---
+
+    - hosts: all
+      become: true
+      roles:
+        - '../roles/splunk-servers'
+      vars_files:
+        - ../vaults/{{ organization_prefix }}_splunk_passwords.yml
+
+      tasks:
+
+        - name: Install Splunk (tgz)
+          unarchive:
+            src: "{{ splunk_runtime_user_home }}/splunk-{{ splunk_version }}.{{ splunk_install_type }}"
+            dest: "{{ splunk_install_location }}"
+            remote_src: true
+          when: splunk_install_type == "tgz"
+
+        - name: Install Splunk (rpm)
+          yum:
+            name: "{{ splunk_runtime_user_home }}/splunk-{{ splunk_version }}.{{ splunk_install_type }}"
+            state: present
+            disable_gpg_check: true
+            installroot: "{{ splunk_install_location }}"
+          when: splunk_install_type == "rpm"
+
+        - name: Install Splunk (deb)
+          apt:
+            deb: "{{ splunk_runtime_user_home }}/splunk-{{ splunk_version }}.{{ splunk_install_type }}"
+            state: latest
+          when: splunk_install_type == "deb"
+
+        - name: Configure user-seed.conf
+          ini_file:
+            path: "{{ splunk_home }}/etc/system/local/user-seed.conf"
+            section: user_info
+            option: "{{ item.option }}"
+            value: "{{ item.value }}"
+            state: present
+            owner: "{{ splunk_runtime_user }}"
+            group: "{{ splunk_runtime_user }}"
+            mode: '0600'
+          loop:
+            - { option: USERNAME, value: "{{ splunk_admin_user }}" }
+            - { option: PASSWORD, value: "{{ splunkAdminPassword }}" }
+
+        - name: Create auth directory
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: directory
+            mode: '0755'
+            recurse: yes
+            owner: "{{ splunk_runtime_user }}"
+            group: "{{ splunk_runtime_user }}"
+          with_items:
+            - "{{ splunk_home }}/etc/auth"
+
+        - name: Copy splunk.secret
+          synchronize:
+            src: "../splunk_base_apps/{{ organization_prefix }}/{{ organization_prefix }}_splunk.secret.conf"
+            dest: "{{ splunk_home }}/etc/auth/splunk.secret"
+
+        - name: Set proper splunk.secret ownership
+          shell: chmod 400 "{{ splunk_home }}/etc/auth/splunk.secret"
+
+        - name: Configure wiredTiger for KVStore
+          ini_file:
+            path: "{{ splunk_home }}/etc/system/local/server.conf"
+            section: kvstore
+            option: storageEngine
+            value: wiredTiger
+            state: present
+            owner: "{{ splunk_runtime_user }}"
+            group: "{{ splunk_runtime_user }}"
+            mode: '0600'
+
+        - name: Configure user permissions for '/var/log' and configure group ownership of auditd
+          shell: "{{ item }}"
+          with_items:
+            - find /var/log/ -type f -exec  setfacl -m u:{{ splunk_runtime_user }}:rx {} \;
+            - find /var/log/ -type d -exec  setfacl -dm u:{{ splunk_runtime_user }}:rx {} \;
+            - sed -i "s/log_group = root/log_group = {{ splunk_runtime_user }}/" /etc/audit/auditd.conf
+            - service auditd restart
+          ignore_errors: true
+
+        - name: Get syslog config file
+          shell: rsyslogd -v | grep "Config file" | awk '{print $3}'
+          register: syslog_config_file
+
+        - name: Capture current syslog timestamp config
+          shell: cat "{{ syslog_config_file.stdout }}" | grep -A 1 'Use default timestamp format' | tail -n 1 | sed -E 's/.*Template(=\"|\s)([^\"]+)(\"\))?/\2/'
+          register: syslog_config
+
+        - name: Reconfigure local syslog to log higher-precision timestamps
+          ansible.builtin.replace:
+            path: "{{ syslog_config_file.stdout }}"
+            regexp: '{{ syslog_config.stdout }}'
+            replace: RSYSLOG_FileFormat
+          when: syslog_config.stdout != "RSYSLOG_FileFormat"
+
+        - name: Restart rsyslog (systemd)
+          ansible.builtin.service:
+            name: rsyslog
+            state: restarted
+          when: syslog_config.stdout != "RSYSLOG_FileFormat"
+
+        - name: Remove Splunk install package
+          file:
+            path: "{{ splunk_runtime_user_home }}/splunk-{{ splunk_version }}.{{ splunk_install_type }}"
+            state: absent
+
+        - name: Change ownership
+          shell: chown -R {{ splunk_runtime_user }}. {{ splunk_home }} {{ splunk_runtime_user_home }}
+
+        - name: Accept Splunk license
+          become_user: "{{ splunk_runtime_user }}"
+          shell: "{{ splunk_home }}/bin/splunk status --accept-license --answer-yes --no-prompt"
+          register: splunk_license_result
+          changed_when: splunk_license_result.rc != 0
+          failed_when: splunk_license_result.rc == 0

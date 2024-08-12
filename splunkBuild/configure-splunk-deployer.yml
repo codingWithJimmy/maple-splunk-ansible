@@ -1,0 +1,98 @@
+# configure-splunk-deployer.yml
+---
+
+    - hosts: shcdeployer
+      become: true
+      roles:
+        - '../roles/splunk-servers'
+      vars_files:
+        - ../vaults/{{ organization_prefix }}_splunk_passwords.yml
+
+      tasks:
+
+        - name: Copy base apps to local apps directory
+          become_user: "{{ splunk_runtime_user }}"
+          synchronize:
+            src: "{{ item }}"
+            dest: "{{ splunk_home }}/etc/apps"
+          with_items:
+          - "../splunk_base_apps/{{ organization_prefix }}/{{ organization_prefix }}_full_license_server"
+          - "../splunk_base_apps/{{ organization_prefix }}/{{ organization_prefix }}_cluster_forwarder_outputs"
+
+        - name: Configure pass4SymmKey for indexer discovery
+          ini_file:
+            path: "{{ splunk_home }}/etc/apps/{{ organization_prefix }}_cluster_forwarder_outputs/local/outputs.conf"
+            section: indexer_discovery:clustered_indexers
+            option: pass4SymmKey
+            value: "{{ idxDiscoveryPass4SymmKey }}"
+            state: present
+
+        - name: Configure cluster manager indexer discovery URI to use localhost (if Cluster Manager)
+          ini_file:
+            path: "{{ splunk_home }}/etc/apps/{{ organization_prefix }}_cluster_forwarder_outputs/local/outputs.conf"
+            section: indexer_discovery:clustered_indexers
+            option: master_uri
+            value: https://localhost:8089
+            state: present
+          when: "'clustermanager' in group_names"
+
+        - name: Copy base apps to shcluster/apps directory
+          become_user: "{{ splunk_runtime_user }}"
+          synchronize:
+            src: "{{ item }}"
+            dest: "{{ splunk_home }}/etc/shcluster/apps"
+          with_items:
+          - "../splunk_base_apps/{{ organization_prefix }}/{{ organization_prefix }}_cluster_forwarder_outputs"
+          - "../splunk_base_apps/{{ organization_prefix }}/{{ organization_prefix }}_full_license_server"
+          - "../splunk_base_apps/{{ organization_prefix }}/{{ organization_prefix }}_all_indexes"
+          - "../splunk_base_apps/{{ organization_prefix }}/{{ organization_prefix }}_cluster_search_base"
+          - "../splunk_base_apps/{{ organization_prefix }}/{{ organization_prefix }}_search_volume_indexes"
+          - "../splunk_base_apps/{{ organization_prefix }}/{{ organization_prefix }}_cluster_indexer_site0"
+
+
+        - name: Configure pass4SymmKey for indexer discovery
+          ini_file:
+            path: "{{ splunk_home }}/etc/shcluster/apps/{{ organization_prefix }}_cluster_forwarder_outputs/local/outputs.conf"
+            section: indexer_discovery:clustered_indexers
+            option: pass4SymmKey
+            value: "{{ idxDiscoveryPass4SymmKey }}"
+            state: present
+
+        - name: Configure pass4SymmKey for searching the cluster
+          ini_file:
+            path: "{{ splunk_home }}/etc/shcluster/apps/{{ organization_prefix }}_cluster_search_base/local/server.conf"
+            section: clustering
+            option: pass4SymmKey
+            value: "{{ idxClusterPass4SymmKey }}"
+            state: present
+
+        - name: Configure cascading replication for shcluster
+          ini_file:
+            path: "{{ splunk_home }}/etc/shcluster/apps/{{ organization_prefix }}_cluster_search_base/local/distsearch.conf"
+            section: replicationSettings
+            option: replicationPolicy
+            value: cascading
+            state: present
+
+        - name: Change ownership
+          shell: chown -R {{ splunk_runtime_user }}. {{ splunk_home }} {{ splunk_runtime_user_home }}
+
+        - name: Configure shclustering stanza for deployer
+          ini_file:
+            path: "{{ splunk_home }}/etc/system/local/server.conf"
+            section: shclustering
+            option: "{{ item.option }}"
+            value: "{{ item.value }}"
+            mode: 0644
+            owner: "{{ splunk_runtime_user }}"
+            group: "{{ splunk_runtime_user }}"
+          become: true
+          loop:
+            - { option: "pass4SymmKey", value: "{{ shcP4SK }}" }
+            - { option: "shcluster_label", value: "{{ shc_label }}" }
+          no_log: true
+
+        - name: Restart Splunk (systemd)
+          ansible.builtin.service:
+            name: "{{ splunk_unit_file }}"
+            state: restarted

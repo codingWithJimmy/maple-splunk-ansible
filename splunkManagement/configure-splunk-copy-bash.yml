@@ -1,0 +1,38 @@
+# configure-splunk-copy-bash.yml
+---
+    - hosts: all
+      become: true
+      become_user: splunk
+      tasks:
+
+      - name: Copy splunk bashrc
+        ansible.builtin.copy:
+          src: ../roles/splunk-servers/files/.bashrc
+          dest: /app/splunk/.bashrc
+          owner: splunk
+          group: splunk
+          mode: 0644
+
+      - name: Copy splunk bashrc
+        ansible.builtin.copy:
+          src: ../roles/splunk-servers/files/.bash_profile
+          dest: /app/splunk/.bash_profile
+          owner: splunk
+          group: splunk
+          mode: 0644
+
+      - name: Copy splunk bash_aliases 
+        ansible.builtin.copy:
+          src: ../roles/splunk-servers/files/.bash_aliases
+          dest: /app/splunk/.bash_aliases
+          owner: splunk
+          group: splunk
+          mode: 0644
+
+      - name: Copy splunk bash_colors 
+        ansible.builtin.copy:
+          src: ../roles/splunk-servers/files/.bash_colors
+          dest: /app/splunk/.bash_colors
+          owner: splunk
+          group: splunk
+          mode: 0644

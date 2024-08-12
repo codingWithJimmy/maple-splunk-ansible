@@ -1,0 +1,8 @@
+# build-indexer-cluster.yml
+---
+
+    - import_playbook: install-base-splunk.yml
+    - import_playbook: configure-thp-ulimits.yml
+    - import_playbook: configure-boot-start.yml
+    - import_playbook: configure-splunk-cm.yml
+    - import_playbook: configure-splunk-indexer.yml

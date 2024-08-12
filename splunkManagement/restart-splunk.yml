@@ -1,0 +1,15 @@
+# restart-splunk.yml
+---
+
+    - hosts: all
+      become: true
+      roles:
+        - '../roles/splunk-servers'
+      serial: "{{ concurrent_restarts }}"
+
+      tasks:
+
+        - name: Restart Splunk (systemd)
+          ansible.builtin.service:
+            name: "{{ splunk_unit_file }}"
+            state: restarted

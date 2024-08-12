@@ -1,0 +1,65 @@
+# download-soar-install.yml
+---
+
+    - hosts: soar
+      become: true
+      become_user: "{{ soar_runtime_user }}"
+      roles:
+        - '../roles/soar-servers'
+      vars_files:
+        - ../vaults/{{ organization_prefix }}_splunk_passwords.yml
+
+      tasks:
+
+      - name: Check version
+        ansible.builtin.uri:
+          url: https://localhost:9999/rest/version
+          user: "{{ soar_admin_user }}"
+          password: "{{ splunkAdminPassword }}"
+          method: GET
+          force_basic_auth: yes
+          status_code: 200
+          validate_certs: no
+          return_content: yes
+        register: current_version
+        changed_when: current_version.json.version != soar_version
+
+      - name: Grab the latest available version from Splunk website
+        shell: curl -Ls {{ soar_latest_url }} | grep "{{ ansible_system }}" | grep "{{ ansible_architecture }}"
+        register: latest_soar_release
+        when: current_version.json.version != soar_version
+      
+      - name: Set latest version
+        set_fact:
+          soar_latest_version: "{{ latest_soar_release.stdout | regex_search('data-version=\"([^\"]+)\"', '\\1') }}"
+        when: current_version.json.version != soar_version
+
+      - name: Set download URL fact (latest)
+        set_fact:
+          soar_download_url: "{{ soar_latest_url }}"
+        when: current_version.json.version != soar_version and soar_latest_version[0] == soar_easy_version
+      
+      - name: Set download URL fact (previous release)
+        set_fact:
+          soar_download_url: "{{ soar_version_url }}"
+        when: current_version.json.version != soar_version and soar_latest_version[0] != soar_easy_version
+
+      - name: Grab the URL to download the desired SOAR package
+        shell: curl -Ls {{ soar_download_url }} | grep "{{ ansible_system }}" | grep "{{ ansible_architecture }}" | grep "{{ soar_version }}"
+        register: soar_download_link
+        when: current_version.json.version != soar_version
+
+      - name: Set the download URL facts for URL and filename
+        set_fact: 
+          download_url: "{{ soar_download_link.stdout | regex_search('data-link=\"([^\"]+)\"', '\\1') }}"
+          download_filename: "{{ soar_download_link.stdout | regex_search('data-filename=\"([^\"]+)\"', '\\1') }}"
+        when: current_version.json.version != soar_version
+
+      - name: Download SOAR
+        become_user: "{{ soar_runtime_user }}"
+        get_url:
+          url: "{{ download_url[0] }}"
+          dest: "{{ soar_runtime_user_home }}/soar-unpriv-{{ soar_easy_version }}.tgz"
+        async: 300
+        poll: 30
+        when: current_version.json.version != soar_version

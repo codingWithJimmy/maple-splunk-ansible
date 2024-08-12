@@ -1,0 +1,37 @@
+# upgrade-splunk-sh-cluster-init.yml
+---
+
+    - hosts: search
+      become: true
+      roles:
+        - '../roles/splunk-servers'
+      vars_files:
+        - ../vaults/{{ organization_prefix }}_splunk_passwords.yml
+
+      tasks:
+
+        - name: Check version
+          become_user: "{{ splunk_runtime_user }}"
+          shell: "{{ splunk_home }}/bin/splunk version | awk '{print $2}'"
+          register: current_version
+          changed_when: current_version.stdout != splunk_version
+
+        - name: Login to Splunk CLI
+          become_user: "{{ splunk_runtime_user }}"
+          shell: "{{ splunk_home }}/bin/splunk login -auth {{ splunk_admin_user }}:{{ splunkAdminPassword }}"
+          no_log: true
+          when: current_version.stdout != splunk_version
+
+        - name: Find captain
+          become_user: "{{ splunk_runtime_user }}"
+          shell: "{{ splunk_home }}/bin/splunk show shcluster-status | grep -m 1 mgmt | sed 's/\t\t                      mgmt_uri : //g' | sed 's/https:\\/\\///' | sed 's/:8089//'"
+          register: shcluster_captain
+          run_once: true
+          when: current_version.stdout != splunk_version
+
+        - name: Trigger rolling upgrade
+          become_user: "{{ splunk_runtime_user }}"
+          shell: "{{ splunk_home }}/bin/splunk upgrade-init shcluster-members --answer-yes"
+          run_once: True
+          delegate_to: "{{ shcluster_captain.stdout }}"
+          when: current_version.stdout != splunk_version

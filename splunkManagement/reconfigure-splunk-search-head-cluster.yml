@@ -1,0 +1,46 @@
+# reconfigure-splunk-search-head-cluster.yml
+---
+
+    - hosts: cluster_search
+      become: true
+      become_user: "{{ splunk_runtime_user }}"
+      roles:
+        - '../roles/splunk-servers'
+      vars_files:
+        - ../vaults/{{ organization_prefix }}_splunk_passwords.yml
+
+      tasks:
+
+
+        - name: Login to Splunk CLI
+          shell: "{{ splunk_home }}/bin/splunk login -auth {{ splunk_admin_user }}:{{ splunkAdminPassword }}"
+          no_log: true
+
+        - name: Fix SHC deployer URL
+          shell: "{{ splunk_home }}/bin/splunk edit shcluster-config -conf_deploy_fetch_url {{ 'https://' + groups[group_prefix + 'searchdeployer'][0] + ':8089' }}"
+
+        - name: Curl the first member of your cluster group
+          ansible.builtin.uri:
+            url: https://{{ groups[group_prefix + 'searchheads'][0] }}:8089/services/shcluster/captain/info
+            user: "{{ splunk_admin_user }}"
+            password: "{{ splunkAdminPassword }}"
+            method: GET
+            force_basic_auth: yes
+            status_code: 200
+            validate_certs: no
+            return_content: true
+          register: captain_get
+          changed_when: captain_get.status == 200
+
+        - name: Name the variable
+          set_fact:
+            "shc_captain": "{{ captain_get.content | ansible.builtin.regex_search('name=\"label\">([^<]+)</s:key>','\\1' | string) }}"
+
+        - name: Display captain
+          ansible.builtin.debug:
+            msg: "{{ shc_label }} cluster captain is {{ shc_captain[0] }}"
+
+        - name: Initiate searchable rolling restart
+          shell: "{{ splunk_home }}/bin/splunk rolling-restart shcluster-members"
+          delegate_to: "{{ shc_captain[0] }}"
+          run_once: true

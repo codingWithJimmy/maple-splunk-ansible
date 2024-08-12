@@ -1,0 +1,41 @@
+# configure-splunk-cm-ha.yml
+---
+- hosts: clustermanager
+  become: true
+  roles:
+    - "../roles/splunk-servers"
+  vars:
+    cluster_manager_list: []
+    cluster_manager_stanzas: []
+
+  tasks:
+
+    - name: Grab the count of the number of cluster managers
+      set_fact:
+        cluster_manager_list: "{{ cluster_manager_list + [ ( lookup('ansible.utils.index_of', groups['clustermanager'], 'eq', item)+1) | string ] }}"
+      with_items: "{{ groups['clustermanager'] }}"
+
+    - name: Create the list of CM manager_uri values
+      set_fact:
+        cluster_manager_stanzas: "{{ cluster_manager_stanzas + [ 'clustermanager:cm' + item ] }}"
+      with_items: "{{ cluster_manager_list }}"
+
+    - name: Configure manager_uri
+      ini_file:
+        path: "{{ splunk_home }}/etc/apps/{{ organization_prefix }}_cluster_manager_base/local/server.conf"
+        section: clustering
+        option: "{{ item.name }}"
+        value: "{{ item.value }}"
+        state: present
+      loop:
+        - { name: "manager_uri" , value: "{{ cluster_manager_stanzas | join(',') }}" }
+        - { name: "manager_switchover_mode", value: "auto" }
+
+    - name: Configure the manager_uri of each CM
+      ini_file:
+        path: "{{ splunk_home }}/etc/apps/{{ organization_prefix }}_cluster_manager_base/local/server.conf"
+        section: "clustermanager{{':'}}cm{{ lookup('ansible.utils.index_of', groups['clustermanager'], 'eq', item)+1 }}"
+        option: manager_uri
+        value: "https://{{ hostvars[item]['ansible_default_ipv4']['address'] }}:8089\n"
+        state: present
+      with_items: "{{ groups['clustermanager'] }}"

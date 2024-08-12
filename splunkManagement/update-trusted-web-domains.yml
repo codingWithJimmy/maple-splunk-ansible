@@ -1,0 +1,29 @@
+# update-trusted-web-domains.yml
+---
+
+    - hosts: search
+      become: true
+      become_user: "{{ splunk_runtime_user }}"
+      roles:
+        - '../roles/splunk-servers'
+      vars_files:
+        - ../vaults/{{ organization_prefix }}_splunk_passwords.yml
+
+      tasks:
+
+        - name: Add defined domains as trusted domains
+          ansible.builtin.uri:
+            url: https://127.0.0.1:8089/servicesNS/nobody/system/web-features/feature:dashboards_csp
+            user: "{{ splunk_admin_user }}"
+            password: "{{ splunkAdminPassword }}"
+            method: POST
+            force_basic_auth: yes
+            status_code: 200
+            body_format: form-urlencoded
+            body:
+              - [ "dashboards_trusted_domain.{{ item.domainTitle }}", "{{ item.domainAddress }}" ]
+            validate_certs: no
+          register: trust_domain_post
+          changed_when: trust_domain_post.status == 200
+          with_items:
+            - "{{ domainConfig }}"

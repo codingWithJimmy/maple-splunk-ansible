@@ -1,0 +1,22 @@
+# reboot-splunk-host.yml
+---
+
+    - hosts: all
+      become: true
+      roles:
+        - '../roles/splunk-servers'
+      serial: "{{ simultaneous_reboots }}"
+
+      tasks:
+
+        - name: Reboot hosts (15 minute timeout)
+          ansible.builtin.reboot:
+            reboot_timeout: 900
+
+        - name: Wait for Splunk management to be online
+          wait_for:
+            host: "{{ ansible_host }}"
+            port: 8089
+            state: started
+            delay: 30
+            timeout: 300

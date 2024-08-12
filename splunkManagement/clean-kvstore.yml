@@ -1,0 +1,41 @@
+# clean-kvstore.yml
+---
+
+    - hosts: cluster_search
+      become: true
+      roles:
+        - '../roles/splunk-servers'
+      vars_files:
+        - ../vaults/{{ organization_prefix }}_splunk_passwords.yml
+
+      tasks:
+
+      - name: Stop Splunk (systemd)
+        ansible.builtin.service:
+          name: "{{ splunk_unit_file }}"
+          state: stopped
+
+      - name: Run clean command
+        become_user: "{{ splunk_runtime_user }}"
+        shell: "{{ splunk_home }}/bin/splunk clean kvstore --local -f"
+
+      - name: Start Splunk (systemd)
+        ansible.builtin.service:
+          name: "{{ splunk_unit_file }}"
+          state: started
+
+      - name: Pause for 2 minute(s) to allow Splunk to start and KVStore process to start
+        pause:
+          minutes: 2
+
+      - name: Login to Splunk CLI
+        shell: "{{ splunk_home }}/bin/splunk login -auth {{ splunk_admin_user }}:{{ splunkAdminPassword }}"
+        no_log: true
+
+      - name: Take a status of the KVStore on the member until it is no longer "Initial Sync"
+        become_user: "{{ splunk_runtime_user }}"
+        shell: "{{ splunk_home }}/bin/splunk show kvstore-status | head -n 20 | grep replicationStatus | awk '{print $3 $4}'"
+        register: syncStatus
+        until: syncStatus.stdout != "InitialSync"
+        retries: 1000
+        delay: 60

@@ -1,0 +1,68 @@
+# configure-splunk-init-search-head-cluster.yml
+---
+
+    - hosts: cluster_search
+      become: true
+      roles:
+        - '../roles/splunk-servers'
+      vars_files:
+        - ../vaults/{{ organization_prefix }}_splunk_passwords.yml
+
+      tasks:
+
+        - name: Initilize cluster members
+          become_user: "{{ splunk_runtime_user }}"
+          shell: "{{ splunk_home }}/bin/splunk init shcluster-config -auth {{ splunk_admin_user }}:{{ splunkAdminPassword }} -mgmt_uri https://{{ ansible_host }}:8089 -replication_port {{ shc_rep_port }} -replication_factor 2 -conf_deploy_fetch_url {{ 'https://' + groups[group_prefix + 'search'][0] + ':8089' }} -secret {{ shcP4SK }} -shcluster_label {{ shc_label }}"
+          no_log: true
+
+        - name: Configure conf_deploy_fetch_mode
+          ini_file:
+            path: "{{ splunk_home }}/etc/system/local/server.conf"
+            section: shclustering
+            option: conf_deploy_fetch_mode
+            value: auto
+            mode: 0644
+            owner: "{{ splunk_runtime_user }}"
+            group: "{{ splunk_runtime_user }}"
+
+        - name: Reconfigure replication port to use SSL
+          ansible.builtin.replace:
+            path: "{{ splunk_home }}/etc/system/local/server.conf"
+            regexp: 'replication_port:'
+            replace: 'replication_port-ssl:'
+
+        - name: Add certificate path and password for SSL replication
+          ini_file:
+            path: "{{ splunk_home }}/etc/system/local/server.conf"
+            section: "replication_port-ssl://{{ shc_rep_port }}"
+            option: "{{ item.option }}"
+            value: "{{ item.value }}"
+            state: present
+            owner: "{{ splunk_runtime_user }}"
+            group: "{{ splunk_runtime_user }}"
+            mode: '0600'
+          loop:
+            - { option: serverCert, value: '$SPLUNK_HOME/etc/auth/irs/host.pem' }
+            - { option: sslPassword, value: "{{ SSL_pass }}" }
+
+        - name: Retart Splunk (systemd)
+          ansible.builtin.service:
+            name: "{{ splunk_unit_file }}"
+            state: restarted
+
+        - name: Wait for Splunk management to be available
+          wait_for:
+            port: 8089
+            timeout: 300
+
+        - name: Bootstrap SHC captain
+          become_user: "{{ splunk_runtime_user }}"
+          delegate_to: "{{ ansible_play_batch[0] }}"
+          shell: "{{ splunk_home }}/bin/splunk bootstrap shcluster-captain -servers_list '{{ 'https://'+ ansible_play_batch | join(':8089,https://') + ':8089' }}' -auth {{ splunk_admin_user }}:{{ splunkAdminPassword }}"
+          run_once: True
+          no_log: true
+
+        - name: Retart Splunk (systemd)
+          ansible.builtin.service:
+            name: "{{ splunk_unit_file }}"
+            state: restarted

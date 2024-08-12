@@ -1,0 +1,69 @@
+# download-splunk-forwarder-install.yml
+---
+- hosts: splunkforwarders
+  become: true
+  roles:
+    - "../roles/splunk-forwarders"
+
+  tasks:
+
+      - name: Create Splunk user
+        ansible.builtin.user:
+          name: "{{ splunk_runtime_user }}"
+          comment: Splunk Runtime User
+
+      - name: Check for installer to be present locally
+        ansible.builtin.stat:
+          path: "{{ splunk_runtime_user_home }}/splunkforwarder-{{ splunk_version }}.{{ splunk_install_type }}"
+        register: download_check
+
+      - name: Check for installation in S3
+        become_user: "{{ splunk_runtime_user }}"
+        shell: aws s3 ls "{{ splunk_bucket_location }}/splunkforwarder-{{ splunk_version }}.{{ splunk_install_type }}"
+        register: s3_check
+        changed_when: download_check.stat.exists != true
+        ignore_errors: yes
+
+      - name: Download Splunk installation from S3
+        shell: aws s3 cp "{{ splunk_bucket_location }}/splunkforwarder-{{ splunk_version }}.{{ splunk_install_type }}" "{{ splunk_runtime_user_home }}/"
+        register: s3_check
+        changed_when: download_check.stat.exists != true and s3_check.rc == 0
+        ignore_errors: yes
+
+      - name: Grab the latest available version from Splunk website
+        shell: curl -Ls {{ splunk_latest_url }} | grep -i "{{ splunk_install_type }}" | grep -i "{{ ansible_system }}" | grep -i "{{ ansible_architecture }}"
+        register: latest_splunk_release
+        when: download_check.stat.exists != true and s3_check.rc == 1
+
+      - name: Set latest version
+        set_fact:
+          splunk_latest_version: "{{ latest_splunk_release.stdout | regex_search('data-version=\"([^\"]+)\"', '\\1') }}"
+        when: download_check.stat.exists != true and s3_check.rc == 1
+
+      - name: Set download URL fact (latest)
+        set_fact:
+          splunk_download_url: "{{ splunk_latest_url }}"
+        when: download_check.stat.exists != true and s3_check.rc == 1 and splunk_latest_version[0] == splunk_version
+
+      - name: Set download URL fact (previous release)
+        set_fact:
+          splunk_download_url: "{{ splunk_version_url }}"
+        when: download_check.stat.exists != true and s3_check.rc == 1 and splunk_latest_version[0] != splunk_version
+
+      - name: Grab the URL to download the desired Splunk package
+        shell: curl -Ls {{ splunk_download_url }} | grep -i "{{ splunk_install_type }}" | grep -i "{{ ansible_system }}" | grep -i "{{ ansible_architecture }}" | grep -i "{{ splunk_version }}"
+        register: splunk_download_link
+        when: download_check.stat.exists != true and s3_check.rc == 1
+
+      - name: Set the download URL facts for URL
+        set_fact:
+          download_url: "{{ splunk_download_link.stdout | regex_search('data-link=\"([^\"]+)\"', '\\1') }}"
+        when: download_check.stat.exists != true and s3_check.rc == 1
+
+      - name: Download Splunk
+        get_url:
+          url: "{{ download_url[0] }}"
+          dest: "{{ splunk_runtime_user_home }}/splunkforwarder-{{ splunk_version }}.{{ splunk_install_type }}"
+        async: 300
+        poll: 30
+        when: download_check.stat.exists != true and s3_check.rc == 1

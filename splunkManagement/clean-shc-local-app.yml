@@ -1,0 +1,17 @@
+# clean-shc-local-app.yml
+---
+
+    - hosts: search
+      become: true
+      become_user: "{{ splunk_runtime_user }}"
+      roles:
+        - '../roles/splunk-servers'
+
+      tasks:
+
+        - name: Rename '{{ targetApp }}' local directory and local.meta to remove local configs
+          shell: |
+            mv "{{ splunk_home }}/etc/apps/{{ item }}/local" "{{ splunk_home }}/etc/apps/{{ item }}/local.old.$(date +%Y%m%d)-$(date +%H%M%S)"
+            mv "{{ splunk_home }}/etc/apps/{{ item }}/metadata/local.meta" "{{ splunk_home }}/etc/apps/{{ item }}/metadata/local.meta.old.$(date +%Y%m%d)-$(date +%H%M%S)"
+          with_items:
+            - "{{ targetApp }}"

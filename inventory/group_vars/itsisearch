@@ -1,0 +1,3 @@
+group_prefix: itsi
+shc_label: <SHC label configured under '[shclustering]'>
+git_repo_name: <Name of repository that contains search head cluster configurations hosted in '$SPLUNK_HOME/etc/shcluster'>

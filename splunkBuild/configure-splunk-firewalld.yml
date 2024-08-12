@@ -1,0 +1,21 @@
+# configure-splunk-firewalld.yml
+---
+
+    - hosts: all
+      become: true
+      roles:
+        - '../roles/splunk-servers'
+
+      tasks:
+
+        - name: Grab Splunk firewalld service template
+          ansible.builtin.template:
+            src: "../roles/splunk-servers/templates/splunk-service.j2"
+            dest: "/etc/firewalld/services/splunk-service.xml"
+            force: yes
+
+        - name: Reload firewalld
+          shell: firewall-cmd --reload
+
+        - name: Add 'splunk' service to public zone
+          shell: firewall-cmd --permanent --zone=public --add-service=splunk-service

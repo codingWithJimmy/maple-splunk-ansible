@@ -1,0 +1,69 @@
+# configure-thp-ulimits.yml
+---
+
+    - hosts: all
+      become: true
+      roles:
+        - '../roles/splunk-servers'
+
+      tasks:
+
+        - name: Create Splunk user (if necessary)
+          ansible.builtin.user:
+            name: "{{ splunk_runtime_user }}"
+            comment: Splunk Runtime User
+
+        - name: Ensure tuned is installed
+          yum:
+            name:
+            - tuned
+            state: present
+
+        - name: Retart tuned
+          ansible.builtin.service:
+            name: tuned
+            state: started
+
+        - name: Capture existing tuned profile
+          shell: cat /etc/tuned/active_profile
+          register: tuned_profile
+
+        - name: Check if ulimits have already been configured
+          ansible.builtin.stat:
+            path: "/etc/security/limits.d/99-splunk-limits.conf"
+          register: ulimits_file
+
+        - name: Configure ulimits for the Splunk runtime user
+          copy:
+            content: |
+              {{ splunk_runtime_user }} hard core 0
+              {{ splunk_runtime_user }} hard maxlogins 10
+              {{ splunk_runtime_user }} soft nofile 65535
+              {{ splunk_runtime_user }} hard nofile 65535
+              {{ splunk_runtime_user }} soft nproc 20480
+              {{ splunk_runtime_user }} hard nproc 20480
+              {{ splunk_runtime_user }} soft fsize unlimited
+              {{ splunk_runtime_user }} hard fsize unlimited
+            dest: "/etc/security/limits.d/99-splunk-limits.conf"
+          when: ulimits_file.stat.exists is false
+
+        - name: Create tuned folder
+          file:
+            state: directory
+            path: /etc/tuned/splunknothp
+          when: tuned_profile.stdout != "splunknothp"
+
+        - name: Create configuration to disable THP
+          copy:
+            content: |
+              [main]
+              include={{ tuned_profile.stdout }}
+
+              [vm]
+              transparent_hugepages=never
+            dest: "/etc/tuned/splunknothp/tuned.conf"
+          when: tuned_profile.stdout != "splunknothp"
+
+        - name: Enable tuned profile to disable THP
+          shell: tuned-adm profile splunknothp
+          when: tuned_profile.stdout != "splunknothp"

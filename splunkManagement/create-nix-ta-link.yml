@@ -1,0 +1,31 @@
+# cluster-bundle-push.yml
+---
+
+    - hosts: clustermanager,shcdeployer,deploymentserver
+      become: true
+      become_user: "{{ splunk_runtime_user }}"
+      roles:
+        - '../roles/splunk-servers'
+
+      tasks:
+
+      - name: Link the Splunk_TA_nix on the Deployment Servers
+        file:
+          src: "{{ splunk_home}}/etc/deployment-apps/Splunk_TA_nix"
+          dest: "{{ splunk_home }}/etc/apps/Splunk_TA_nix"
+          state: link
+        when: "'deploymentserver' in group_names"
+
+      - name: Link the Splunk_TA_nix on the Cluster Manager
+        file:
+          src: "{{ splunk_home}}/etc/manager-apps/Splunk_TA_nix"
+          dest: "{{ splunk_home }}/etc/apps/Splunk_TA_nix"
+          state: link
+        when: "'clustermanager' in group_names"
+
+      - name: Link the Splunk_TA_nix on the SHC Deployers
+        file:
+          src: "{{ splunk_home}}/etc/shcluster/apps/Splunk_TA_nix"
+          dest: "{{ splunk_home }}/etc/apps/Splunk_TA_nix"
+          state: link
+        when: "'shcdeployer' in group_names"

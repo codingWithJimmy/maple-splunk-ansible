@@ -1,0 +1,30 @@
+# configure-splunk-forwarder-ssl.yml
+---
+
+    - hosts: splunkforwarders
+      become: true
+      roles:
+        - '../roles/splunk-forwarders'
+      vars_files:
+        - ../vaults/{{ organization_prefix }}_splunk_passwords.yml
+      vars:
+        all_hosts: "{{ query('inventory_hostnames', 'all')}}"
+
+      tasks:
+
+      - name: Add certificate configs and passwords to local server.conf
+        ini_file:
+          path: "{{ splunk_home }}/etc/system/local/server.conf"
+          section: "{{ item.section }}"
+          option: "{{ item.option }}"
+          value: "{{ item.value }}"
+          state: present
+          owner: "{{ splunk_runtime_user }}"
+          group: "{{ splunk_runtime_user }}"
+          mode: '0600'
+        loop:
+          - { section: sslConfig, option: sslRootCAPath, value: '$SPLUNK_HOME/etc/auth/irs/IRSFullProdCAChain.pem' }
+          - { section: sslConfig, option: serverCert, value: '$SPLUNK_HOME/etc/auth/irs/host.pem' }
+          - { section: sslConfig, option: sslPassword, value: "{{ SSL_pass }}" }
+          - { section: sslConfig, option: sslVerifyServerCert, value: 'true' }
+          - { section: sslConfig, option: sslCommonNameToCheck, value: "{{ all_hosts | join(',') }}" }

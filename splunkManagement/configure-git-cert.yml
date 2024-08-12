@@ -1,0 +1,49 @@
+# configure-git-cert.yml
+---
+
+    - hosts: clustermanager, shcdeployer, deploymentserver, standalone, hf, monitoringconsole
+      become: true
+      roles:
+        - '../roles/splunk-servers'
+      vars_files:
+        - ../vaults/{{ organization_prefix }}_splunk_passwords.yml
+
+      tasks:
+
+        - name: Install git
+          ansible.builtin.package:
+            name: git
+            state: present
+
+        - name: Ensure .ssh directory exists.
+          become_user: "{{ splunk_runtime_user }}"
+          file:
+            dest: "{{ splunk_runtime_user_home }}/.ssh"
+            mode: 0700
+            owner: "{{ splunk_runtime_user }}"
+            group: "{{ splunk_runtime_user }}"
+            state: directory
+
+        - name: Install ssh private key
+          become_user: "{{ splunk_runtime_user }}"
+          copy:
+            content: "{{ git_private_key }}"
+            dest: "{{ splunk_runtime_user_home }}/.ssh/{{ git_ssh_key_name }}"
+            mode: 0600
+            owner: "{{ splunk_runtime_user }}"
+            group: "{{ splunk_runtime_user }}"
+
+        - name: Install ssh public key
+          become_user: "{{ splunk_runtime_user }}"
+          copy:
+            content: "{{ git_public_key }}"
+            dest: "{{ splunk_runtime_user_home }}/.ssh/{{ git_ssh_key_name }}.pub"
+            mode: 0600
+            owner: "{{ splunk_runtime_user }}"
+            group: "{{ splunk_runtime_user }}"
+
+        - name: Configure git locally
+          become_user: "{{ splunk_runtime_user }}"
+          shell: |
+            git config --global user.name "{{ git_user_name }}"
+            git config --global user.email "{{ git_user_email }}"

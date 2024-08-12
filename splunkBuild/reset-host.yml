@@ -1,0 +1,67 @@
+# reset-host.yml
+---
+
+    - hosts: all
+      become: true
+      roles:
+        - '../roles/splunk-servers'
+
+      tasks:
+
+        - name: Stop Splunk (systemd)
+          ansible.builtin.service:
+            name: "{{ splunk_unit_file }}"
+            state: stopped
+          ignore_errors: true
+
+        - name: Disable boot-start
+          shell: "{{ splunk_home }}/bin/splunk disable boot-start"
+          ignore_errors: true
+
+        - name: Remove {{ splunk_unit_file }}.service file
+          file:
+            path: /etc/systemd/system/{{ splunk_unit_file }}.service
+            state: absent
+          ignore_errors: true
+
+        - name: Reload systemctl
+          shell: systemctl daemon-reload
+
+        - name: Uninstall Splunk (rpm)
+          yum:
+            name: splunk
+            state: absent
+          when: "'.rpm' in splunk_install"
+
+        - name: Uninstall Splunk (deb)
+          apt:
+            deb: splunk
+            state: absent
+          when: "'.deb' in splunk_install"
+
+        - name: Remove 'splunk' directory contents
+          shell: rm -rf "{{ splunk_home }}"/*
+
+        - name: Remove ulimits configuration
+          file:
+            path: /etc/security/limits.d/99-splunk-limits.conf
+            state: absent
+
+        - name: Capture existing tuned profile
+          shell: cat /etc/tuned/active_profile
+          register: current_profile
+
+        - name: Capture previous tuned profile
+          shell: cat "/etc/tuned/splunknothp/tuned.conf" | grep include | sed 's/include=//'
+          register: tuned_profile
+          when: current_profile.stdout == "splunknothp"
+
+        - name: Change tuned profile to standard
+          shell: tuned-adm profile {{ tuned_profile.stdout }}
+          when: current_profile.stdout == "splunknothp"
+
+        - name: Remove splunknothp tuned profile
+          file:
+            path: /etc/tuned/splunknothp/tuned.conf
+            state: absent
+          when: current_profile.stdout == "splunknothp"

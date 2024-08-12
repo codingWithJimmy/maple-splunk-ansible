@@ -1,0 +1,96 @@
+# configure-splunk-init-git.yml
+---
+
+    - hosts: clustermanager, shcdeployer, deploymentserver, standalone, hf
+      become: true
+      roles:
+        - '../roles/splunk-servers'
+      vars_files:
+        - ../vaults/{{ organization_prefix }}_splunk_passwords.yml
+
+      tasks:
+
+        - name: Install git
+          ansible.builtin.package:
+            name: git
+            state: present
+
+        - name: Ensure .ssh directory exists.
+          become_user: "{{ splunk_runtime_user }}"
+          file:
+            dest: "{{ splunk_runtime_user_home }}/.ssh"
+            mode: 0700
+            owner: "{{ splunk_runtime_user }}"
+            group: "{{ splunk_runtime_user }}"
+            state: directory
+
+        - name: Install ssh private key
+          become_user: "{{ splunk_runtime_user }}"
+          copy:
+            content: "{{ git_private_key }}"
+            dest: "{{ splunk_runtime_user_home }}/.ssh/{{ git_ssh_key_name }}"
+            mode: 0600
+            owner: "{{ splunk_runtime_user }}"
+            group: "{{ splunk_runtime_user }}"
+
+        - name: Install ssh public key
+          become_user: "{{ splunk_runtime_user }}"
+          copy:
+            content: "{{ git_public_key }}"
+            dest: "{{ splunk_runtime_user_home }}/.ssh/{{ git_ssh_key_name }}.pub"
+            mode: 0600
+            owner: "{{ splunk_runtime_user }}"
+            group: "{{ splunk_runtime_user }}"
+
+        - name: Configure git locally
+          become_user: "{{ splunk_runtime_user }}"
+          shell: |
+            git config --global user.name "{{ git_user_name }}"
+            git config --global user.email "{{ git_user_email }}"
+
+        - name: Create serverclass.conf link in 'deployment-apps' directory
+          become_user: "{{ splunk_runtime_user }}"
+          shell: |
+            mv "{{ splunk_home }}/etc/system/local/serverclass.conf" "{{ splunk_home }}/etc/deployment-apps"
+            ln -s "{{ splunk_home }}/etc/deployment-apps/serverclass.conf" "{{ splunk_home }}/etc/system/local/serverclass.conf"
+          when: "'deploymentserver' in group_names"
+          ignore_errors: yes
+
+        - name: Initialize and push the 'deployment-apps' directory
+          become_user: "{{ splunk_runtime_user }}"
+          shell: |
+            git init
+            git checkout -b main
+            git add .
+            git commit -m "Initial commit"
+            git remote add origin {{ ds_repo_url }}
+            git push --set-upstream origin main
+          args:
+            chdir: "{{ splunk_home }}/etc/deployment-apps"
+          when: "'deploymentserver' in group_names"
+
+        - name: Initialize and push the 'manager-apps' directory
+          become_user: "{{ splunk_runtime_user }}"
+          shell: |
+            git init
+            git checkout -b main
+            git add .
+            git commit -m "Initial commit"
+            git remote add origin {{ cm_repo_url }}
+            git push --set-upstream origin main
+          args:
+            chdir: "{{ splunk_home }}/etc/manager-apps"
+          when: "'clustermanager' in group_names"
+
+        - name: Initialize and push the 'shcluster' directory
+          become_user: "{{ splunk_runtime_user }}"
+          shell: |
+            git init
+            git checkout -b main
+            git add .
+            git commit -m "Initial commit"
+            git remote add origin {{ shc_repo_url }}
+            git push --set-upstream origin main
+          args:
+            chdir: "{{ splunk_home }}/etc/shcluster"
+          when: "'shcdeployer' in group_names"

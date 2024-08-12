@@ -1,0 +1,15 @@
+# indexer-cluster-rolling0-restartyml
+---
+
+    - hosts: indexer
+      become: true
+      roles:
+        - '../roles/splunk-servers'
+      serial: 15
+
+      tasks:
+
+        - name: Restart Splunk (systemd)
+          ansible.builtin.service:
+            name: "{{ splunk_unit_file }}"
+            state: restarted
